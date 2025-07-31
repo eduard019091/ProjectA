@@ -1,149 +1,41 @@
-// Cria a tabela de requisições individuais se necessário
-function criarTabelaRequisicoes() {
-    return new Promise((resolve, reject) => {
-        const sql = `
-            CREATE TABLE IF NOT EXISTS requisicoes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                userId INTEGER NOT NULL,
-                itemId INTEGER NOT NULL,
-                quantidade INTEGER NOT NULL,
-                centroCusto TEXT NOT NULL,
-                projeto TEXT NOT NULL,
-                justificativa TEXT,
-                status TEXT DEFAULT 'pendente' CHECK (status IN ('pendente', 'aprovada', 'rejeitada')),
-                observacoes TEXT,
-                data DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (userId) REFERENCES usuarios(id),
-                FOREIGN KEY (itemId) REFERENCES itens(id)
-            )
-        `;
-        db.run(sql, (err) => {
-            if (err) reject(err);
-            else resolve();
+// database.js - Sistema de Gerenciamento de Estoque
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+
+class DatabaseManager {
+    constructor() {
+        this.dbPath = path.join(__dirname, 'estoque.db');
+        this.db = null;
+        this.initialize();
+    }
+
+    initialize() {
+        this.db = new sqlite3.Database(this.dbPath, (err) => {
+            if (err) {
+                console.error('Erro ao conectar com o banco de dados:', err.message);
+            } else {
+                console.log('Conectado ao banco de dados SQLite.');
+                this.db.run('PRAGMA foreign_keys = ON');
+                this.initializeDatabase();
+            }
         });
-    });
-}
-    const sqlite3 = require('sqlite3').verbose();
-    const path = require('path');
-    const fs = require('fs');
-    const bcrypt = require('bcrypt'); // Você precisa instalar: npm install bcrypt
-
-    // Criar conexão com o banco de dados
-    const dbPath = path.join(__dirname, 'estoque.db');
-
-    // Verificar se o diretório do banco de dados existe
-    const dbDir = path.dirname(dbPath);
-    if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
     }
 
-    // Verificar se o arquivo do banco de dados existe, se não existir, criar um novo
-    const dbExists = fs.existsSync(dbPath);
-    if (!dbExists) {
-        console.log('Arquivo de banco de dados não encontrado. Criando um novo banco de dados.');
-    }
-
-    // Configurações para conexão mais robusta
-    const connectionOptions = {
-        // Ativar chaves estrangeiras
-        foreignKeys: true,
-        // Tentar novamente se o banco estiver ocupado (aumentado para 10 segundos)
-        busyTimeout: 10000
-    };
-
-
-    // Função para verificar permissões de arquivo
-    function verificarPermissoesArquivo() {
-        try {
-            if (fs.existsSync(dbPath)) {
-                const stats = fs.statSync(dbPath);
-                console.log('Permissões do arquivo de banco:', {
-                    owner: stats.uid,
-                    group: stats.gid,
-                    mode: stats.mode.toString(8),
-                    size: stats.size,
-                    modifiedTime: stats.mtime
-                });
-                
-                // Testar escrita
-                try {
-                    fs.accessSync(dbPath, fs.constants.R_OK | fs.constants.W_OK);
-                    console.log('Arquivo do banco tem permissões de leitura e escrita');
-                    return true;
-                } catch (e) {
-                    console.error('Erro de permissões no arquivo do banco:', e.message);
-                    return false;
-                }
-            }
-            return true; // Retorna true se o arquivo não existir (será criado)
-        } catch (e) {
-            console.error('Erro ao verificar permissões do arquivo:', e);
-            return false;
-        }
-    }
-
-    // Verificar permissões do arquivo antes de conectar
-    verificarPermissoesArquivo();
-
-    // Criar conexão com o banco de dados com tratamento de erros melhorado
-    const db = new sqlite3.Database(dbPath, connectionOptions, (err) => {
-        if (err) {
-            console.error('ERRO CRÍTICO ao conectar ao banco de dados SQLite:', err);
-            console.error('Detalhes do erro:', {
-                code: err.code,
-                errno: err.errno,
-                syscall: err.syscall,
-                message: err.message
-            });
-            console.error('Caminho do banco de dados:', dbPath);
-            console.error('Diretório atual:', process.cwd());
-            
-            // Verificar se o diretório do banco existe e tem permissões
-            try {
-                const dirStats = fs.statSync(dbDir);
-                console.log('Permissões do diretório do banco:', {
-                    owner: dirStats.uid,
-                    group: dirStats.gid,
-                    mode: dirStats.mode.toString(8)
-                });
-            } catch (e) {
-                console.error('Erro ao verificar diretório do banco:', e.message);
-            }
-        } else {
-            console.log('Conectado ao banco de dados SQLite:', dbPath);
-            
-            // Se o banco acabou de ser criado, será inicializado com as tabelas
-            if (!dbExists) {
-                console.log('Inicializando novo banco de dados com estrutura padrão...');
-            }
-            
-            // Executar PRAGMA para verificar a saúde do banco de dados
-            db.get("PRAGMA integrity_check", [], (err, result) => {
-                if (err) {
-                    console.error("Erro ao verificar integridade do banco:", err.message);
-                } else {
-                    console.log("Verificação de integridade:", result);
-                }
-            });
-        }
-    });
-
-    // Criar tabelas
-    db.serialize(() => {
+    async initializeDatabase() {
         // Tabela de usuários
-        db.run(`
+        await this.dbRun(`
             CREATE TABLE IF NOT EXISTS usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 email TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
-                userType TEXT NOT NULL CHECK (userType IN ('admin', 'user')) DEFAULT 'user',
-                data_cadastro DATETIME DEFAULT CURRENT_TIMESTAMP
+                userType TEXT DEFAULT 'user' CHECK(userType IN ('user', 'admin')),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
         // Tabela de itens
-        db.run(`
+        await this.dbRun(`
             CREATE TABLE IF NOT EXISTS itens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome TEXT NOT NULL,
@@ -153,22 +45,24 @@ function criarTabelaRequisicoes() {
                 destino TEXT,
                 valor REAL DEFAULT 0,
                 nf TEXT,
-                quantidade INTEGER NOT NULL DEFAULT 0,
-                minimo INTEGER NOT NULL DEFAULT 0,
-                ideal INTEGER NOT NULL DEFAULT 0,
+                quantidade INTEGER DEFAULT 0,
+                minimo INTEGER DEFAULT 0,
+                ideal INTEGER DEFAULT 0,
                 infos TEXT,
-                data_cadastro DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
         // Tabela de movimentações
-        db.run(`
+        await this.dbRun(`
             CREATE TABLE IF NOT EXISTS movimentacoes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 item_id INTEGER NOT NULL,
                 item_nome TEXT NOT NULL,
-                tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'saida')),
+                tipo TEXT NOT NULL CHECK(tipo IN ('entrada', 'saida')),
                 quantidade INTEGER NOT NULL,
+                origem TEXT,
                 destino TEXT,
                 descricao TEXT,
                 data DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -177,805 +71,449 @@ function criarTabelaRequisicoes() {
         `);
 
         // Tabela de pacotes de requisição
-        db.run(`
-            CREATE TABLE IF NOT EXISTS pacotes_requisicao (
+        await this.dbRun(`
+            CREATE TABLE IF NOT EXISTS pacotes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                userId INTEGER,
-                centroCusto TEXT,
-                projeto TEXT,
+                userId INTEGER NOT NULL,
+                userName TEXT,
+                centroCusto TEXT NOT NULL,
+                projeto TEXT NOT NULL,
                 justificativa TEXT,
-                status TEXT DEFAULT 'PENDENTE',
+                status TEXT DEFAULT 'PENDENTE' CHECK(status IN ('PENDENTE', 'APROVADO', 'REJEITADO', 'PARCIAL')),
+                observacoes TEXT,
                 data DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (userId) REFERENCES usuarios(id)
+                aprovado_por INTEGER,
+                aprovado_em DATETIME,
+                FOREIGN KEY (userId) REFERENCES usuarios (id),
+                FOREIGN KEY (aprovado_por) REFERENCES usuarios (id)
             )
         `);
 
         // Tabela de itens do pacote
-        db.run(`
-            CREATE TABLE IF NOT EXISTS itens_pacote (
+        await this.dbRun(`
+            CREATE TABLE IF NOT EXISTS pacote_itens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pacoteId INTEGER,
-                itemId INTEGER,
-                quantidade INTEGER,
-                status TEXT DEFAULT 'PENDENTE',
+                pacoteId INTEGER NOT NULL,
+                itemId INTEGER NOT NULL,
+                itemNome TEXT NOT NULL,
+                quantidade INTEGER NOT NULL,
+                quantidadeAprovada INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'PENDENTE' CHECK(status IN ('PENDENTE', 'APROVADO', 'REJEITADO', 'ENTREGUE')),
                 observacoes TEXT,
-                FOREIGN KEY (pacoteId) REFERENCES pacotes_requisicao(id),
-                FOREIGN KEY (itemId) REFERENCES itens(id)
+                FOREIGN KEY (pacoteId) REFERENCES pacotes (id) ON DELETE CASCADE,
+                FOREIGN KEY (itemId) REFERENCES itens (id)
             )
         `);
 
-        // Índices para melhor performance
-        db.run(`CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_itens_nome ON itens(nome)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_movimentacoes_item_id ON movimentacoes(item_id)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_movimentacoes_data ON movimentacoes(data)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_pacotes_userId ON pacotes_requisicao(userId)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_itens_pacote_pacoteId ON itens_pacote(pacoteId)`);
-    });
+        // Criar usuários padrão se não existirem
+        await this.createDefaultUsers();
+    }
 
-    // Funções para usuários
+    async createDefaultUsers() {
+        const adminExists = await this.dbGet("SELECT id FROM usuarios WHERE email = 'admin@sistema.com'");
+        if (!adminExists) {
+            await this.dbRun(`
+                INSERT INTO usuarios (name, email, password, userType) 
+                VALUES ('Administrador', 'admin@sistema.com', 'admin123', 'admin')
+            `);
+            console.log('Usuário admin criado: admin@sistema.com / admin123');
+        }
 
-    // Buscar usuário por email
-    function buscarUsuarioPorEmail(email) {
+        const userExists = await this.dbGet("SELECT id FROM usuarios WHERE email = 'user@sistema.com'");
+        if (!userExists) {
+            await this.dbRun(`
+                INSERT INTO usuarios (name, email, password, userType) 
+                VALUES ('Usuário Teste', 'user@sistema.com', 'user123', 'user')
+            `);
+            console.log('Usuário comum criado: user@sistema.com / user123');
+        }
+    }
+
+    // Funções auxiliares para promisificar operações do SQLite
+    dbRun(sql, params = []) {
         return new Promise((resolve, reject) => {
-            const sql = `SELECT * FROM usuarios WHERE email = ?`;
-            
-            db.get(sql, [email], (err, row) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(row);
-                }
+            this.db.run(sql, params, function(err) {
+                if (err) reject(err);
+                else resolve({ id: this.lastID, changes: this.changes });
             });
         });
     }
 
-    // Cadastrar usuário
-    function cadastrarUsuario(userData) {
-        return new Promise(async (resolve, reject) => {
-            try {
-                // Hash da senha
-                const saltRounds = 10;
-                const hashedPassword = await bcrypt.hash(userData.password, saltRounds);
-                
-                const sql = `
-                    INSERT INTO usuarios (name, email, password, userType)
-                    VALUES (?, ?, ?, ?)
-                `;
-                
-                db.run(sql, [
-                    userData.name,
-                    userData.email,
-                    hashedPassword,
-                    userData.userType || 'user'
-                ], function(err) {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        // Retornar o usuário criado (sem a senha)
-                        resolve({
-                            id: this.lastID,
-                            name: userData.name,
-                            email: userData.email,
-                            userType: userData.userType || 'user'
-                        });
-                    }
-                });
-            } catch (error) {
-                reject(error);
-            }
-        });
-    }
-
-    // Autenticar usuário
-    function autenticarUsuario(email, password) {
-        return new Promise(async (resolve, reject) => {
-            try {
-                const usuario = await buscarUsuarioPorEmail(email);
-                
-                if (!usuario) {
-                    resolve(null);
-                    return;
-                }
-                
-                // Verificar senha
-                const senhaValida = await bcrypt.compare(password, usuario.password);
-                
-                if (senhaValida) {
-                    // Retornar dados do usuário (sem a senha)
-                    resolve({
-                        id: usuario.id,
-                        name: usuario.name,
-                        email: usuario.email,
-                        userType: usuario.userType
-                    });
-                } else {
-                    resolve(null);
-                }
-            } catch (error) {
-                reject(error);
-            }
-        });
-    }
-
-    // Funções para operações no banco de itens
-
-    // Inserir item
-    function inserirItem(item) {
+    dbGet(sql, params = []) {
         return new Promise((resolve, reject) => {
-            const sql = `
+            this.db.get(sql, params, (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
+    }
+
+    dbAll(sql, params = []) {
+        return new Promise((resolve, reject) => {
+            this.db.all(sql, params, (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
+    }
+
+    // API de Usuários
+    async createUser(userData) {
+        const { name, email, password, userType = 'user' } = userData;
+        return await this.dbRun(
+            'INSERT INTO usuarios (name, email, password, userType) VALUES (?, ?, ?, ?)',
+            [name, email, password, userType]
+        );
+    }
+
+    async getUserByEmail(email) {
+        return await this.dbGet('SELECT * FROM usuarios WHERE email = ?', [email]);
+    }
+
+    async getUserById(id) {
+        return await this.dbGet('SELECT * FROM usuarios WHERE id = ?', [id]);
+    }
+
+    // API de Itens
+    async getAllItens() {
+        return await this.dbAll('SELECT * FROM itens ORDER BY nome');
+    }
+
+    async getItemById(id) {
+        return await this.dbGet('SELECT * FROM itens WHERE id = ?', [id]);
+    }
+
+    async createItem(itemData) {
+        const { nome, serie, descricao, origem, destino, valor, nf, quantidade, minimo, ideal, infos } = itemData;
+        const result = await this.dbRun(`
+            INSERT INTO itens (nome, serie, descricao, origem, destino, valor, nf, quantidade, minimo, ideal, infos)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [nome, serie, descricao, origem, destino, valor, nf, quantidade, minimo, ideal, infos]);
+        
+        if (quantidade > 0) {
+            await this.createMovimentacao({
+                item_id: result.id,
+                item_nome: nome,
+                tipo: 'entrada',
+                quantidade: quantidade,
+                origem: origem || 'Cadastro inicial',
+                descricao: 'Cadastro inicial do item'
+            });
+        }
+        
+        return result;
+    }
+
+    async updateItem(id, itemData) {
+        const { nome, serie, descricao, origem, destino, valor, nf, quantidade, minimo, ideal, infos } = itemData;
+        return await this.dbRun(`
+            UPDATE itens 
+            SET nome = ?, serie = ?, descricao = ?, origem = ?, destino = ?, valor = ?, nf = ?, 
+                quantidade = ?, minimo = ?, ideal = ?, infos = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        `, [nome, serie, descricao, origem, destino, valor, nf, quantidade, minimo, ideal, infos, id]);
+    }
+
+    async deleteItem(id) {
+        return await this.dbRun('DELETE FROM itens WHERE id = ?', [id]);
+    }
+
+    // API de Movimentações
+    async adicionarEstoque(itemId, quantidade, observacao = '') {
+        const item = await this.getItemById(itemId);
+        if (!item) throw new Error('Item não encontrado');
+
+        const novaQuantidade = item.quantidade + quantidade;
+        await this.dbRun('UPDATE itens SET quantidade = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
+                   [novaQuantidade, itemId]);
+
+        return await this.createMovimentacao({
+            item_id: itemId,
+            item_nome: item.nome,
+            tipo: 'entrada',
+            quantidade: quantidade,
+            origem: 'Adição manual',
+            descricao: observacao || 'Adição de estoque'
+        });
+    }
+
+    async retirarEstoque(itemId, quantidade, destino, observacao = '') {
+        const item = await this.getItemById(itemId);
+        if (!item) throw new Error('Item não encontrado');
+        if (item.quantidade < quantidade) throw new Error('Quantidade insuficiente em estoque');
+
+        const novaQuantidade = item.quantidade - quantidade;
+        await this.dbRun('UPDATE itens SET quantidade = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
+                   [novaQuantidade, itemId]);
+
+        return await this.createMovimentacao({
+            item_id: itemId,
+            item_nome: item.nome,
+            tipo: 'saida',
+            quantidade: quantidade,
+            destino: destino,
+            descricao: observacao || 'Retirada de estoque'
+        });
+    }
+
+    async createMovimentacao(movData) {
+        const { item_id, item_nome, tipo, quantidade, origem, destino, descricao } = movData;
+        return await this.dbRun(`
+            INSERT INTO movimentacoes (item_id, item_nome, tipo, quantidade, origem, destino, descricao)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [item_id, item_nome, tipo, quantidade, origem, destino, descricao]);
+    }
+
+    async getMovimentacoes(dias = 30) {
+        return await this.dbAll(`
+            SELECT * FROM movimentacoes 
+            WHERE data >= datetime('now', '-${dias} days')
+            ORDER BY data DESC
+        `);
+    }
+
+    // API de Pacotes de Requisição
+    async createPacote(pacoteData) {
+        const { userId, centroCusto, projeto, justificativa, itens } = pacoteData;
+        
+        const user = await this.getUserById(userId);
+        const userName = user ? user.name : `ID: ${userId}`;
+        
+        const pacoteResult = await this.dbRun(`
+            INSERT INTO pacotes (userId, userName, centroCusto, projeto, justificativa)
+            VALUES (?, ?, ?, ?, ?)
+        `, [userId, userName, centroCusto, projeto, justificativa]);
+        
+        const pacoteId = pacoteResult.id;
+        
+        for (const item of itens) {
+            const itemData = await this.getItemById(item.itemId);
+            const itemNome = itemData ? itemData.nome : `ID: ${item.itemId}`;
+            
+            await this.dbRun(`
+                INSERT INTO pacote_itens (pacoteId, itemId, itemNome, quantidade)
+                VALUES (?, ?, ?, ?)
+            `, [pacoteId, item.itemId, itemNome, item.quantidade]);
+        }
+        
+        return pacoteResult;
+    }
+
+    async getPacotesByUserId(userId) {
+        const pacotes = await this.dbAll('SELECT * FROM pacotes WHERE userId = ? ORDER BY data DESC', [userId]);
+        
+        for (const pacote of pacotes) {
+            pacote.itens = await this.dbAll(`
+                SELECT pi.*, i.nome as itemNome 
+                FROM pacote_itens pi
+                LEFT JOIN itens i ON pi.itemId = i.id
+                WHERE pi.pacoteId = ?
+            `, [pacote.id]);
+        }
+        
+        return pacotes;
+    }
+
+    async getPacotesPendentes() {
+        const pacotes = await this.dbAll("SELECT * FROM pacotes WHERE status = 'PENDENTE' ORDER BY data ASC");
+        
+        for (const pacote of pacotes) {
+            pacote.itens = await this.dbAll(`
+                SELECT pi.*, i.nome as itemNome 
+                FROM pacote_itens pi
+                LEFT JOIN itens i ON pi.itemId = i.id
+                WHERE pi.pacoteId = ?
+            `, [pacote.id]);
+        }
+        
+        return pacotes;
+    }
+
+    async getPacoteById(id) {
+        const pacote = await this.dbGet('SELECT * FROM pacotes WHERE id = ?', [id]);
+        if (pacote) {
+            pacote.itens = await this.dbAll(`
+                SELECT pi.*, i.nome as itemNome, i.quantidade as estoqueAtual
+                FROM pacote_itens pi
+                LEFT JOIN itens i ON pi.itemId = i.id
+                WHERE pi.pacoteId = ?
+            `, [id]);
+        }
+        return pacote;
+    }
+
+    async updatePacoteStatus(id, status, observacoes = '', aprovadoPor = null) {
+        return await this.dbRun(`
+            UPDATE pacotes 
+            SET status = ?, observacoes = ?, aprovado_por = ?, aprovado_em = CURRENT_TIMESTAMP
+            WHERE id = ?
+        `, [status, observacoes, aprovadoPor, id]);
+    }
+
+    async updatePacoteItemStatus(pacoteId, itemId, status, quantidadeAprovada, observacoes = '') {
+        return await this.dbRun(`
+            UPDATE pacote_itens 
+            SET status = ?, quantidadeAprovada = ?, observacoes = ?
+            WHERE pacoteId = ? AND itemId = ?
+        `, [status, quantidadeAprovada, observacoes, pacoteId, itemId]);
+    }
+
+    async processarEntregaPacote(pacoteId, itensAprovados, adminId) {
+        const pacote = await this.getPacoteById(pacoteId);
+        if (!pacote) throw new Error('Pacote não encontrado');
+
+        for (const itemAprovado of itensAprovados) {
+            const { itemId, quantidadeAprovada } = itemAprovado;
+            
+            const item = await this.getItemById(itemId);
+            if (!item) continue;
+
+            if (item.quantidade >= quantidadeAprovada) {
+                await this.retirarEstoque(
+                    itemId, 
+                    quantidadeAprovada, 
+                    `${pacote.centroCusto} - ${pacote.projeto}`,
+                    `Entrega de requisição #${pacoteId} - ${pacote.justificativa}`
+                );
+
+                await this.updatePacoteItemStatus(
+                    pacoteId, 
+                    itemId, 
+                    'ENTREGUE', 
+                    quantidadeAprovada, 
+                    'Item entregue com sucesso'
+                );
+            } else {
+                await this.updatePacoteItemStatus(
+                    pacoteId, 
+                    itemId, 
+                    'REJEITADO', 
+                    0, 
+                    `Estoque insuficiente. Disponível: ${item.quantidade}, Solicitado: ${quantidadeAprovada}`
+                );
+            }
+        }
+
+        const itensEntregues = await this.dbAll(`
+            SELECT COUNT(*) as total FROM pacote_itens 
+            WHERE pacoteId = ? AND status = 'ENTREGUE'
+        `, [pacoteId]);
+        
+        const totalItens = await this.dbAll(`
+            SELECT COUNT(*) as total FROM pacote_itens 
+            WHERE pacoteId = ?
+        `, [pacoteId]);
+
+        let statusFinal = 'APROVADO';
+        if (itensEntregues[0].total === 0) {
+            statusFinal = 'REJEITADO';
+        } else if (itensEntregues[0].total < totalItens[0].total) {
+            statusFinal = 'PARCIAL';
+        }
+
+        await this.updatePacoteStatus(pacoteId, statusFinal, 'Processamento concluído', adminId);
+        
+        return { statusFinal, itensProcessados: itensAprovados.length };
+    }
+
+    // Funções Utilitárias
+    async unificarItens() {
+        const itens = await this.dbAll('SELECT * FROM itens ORDER BY nome, serie');
+        const grupos = new Map();
+        
+        for (const item of itens) {
+            const chave = `${item.nome}|${item.serie || ''}`;
+            if (!grupos.has(chave)) {
+                grupos.set(chave, []);
+            }
+            grupos.get(chave).push(item);
+        }
+        
+        let totalUnificados = 0;
+        
+        for (const [chave, grupo] of grupos) {
+            if (grupo.length > 1) {
+                grupo.sort((a, b) => a.id - b.id);
+                const principal = grupo[0];
+                const duplicados = grupo.slice(1);
+                
+                let quantidadeTotal = principal.quantidade;
+                for (const dup of duplicados) {
+                    quantidadeTotal += dup.quantidade;
+                }
+                
+                await this.dbRun('UPDATE itens SET quantidade = ? WHERE id = ?', [quantidadeTotal, principal.id]);
+                
+                for (const dup of duplicados) {
+                    await this.dbRun('DELETE FROM itens WHERE id = ?', [dup.id]);
+                }
+                
+                totalUnificados += duplicados.length;
+            }
+        }
+        
+        return { totalUnificados, totalItensUnicos: grupos.size };
+    }
+
+    async exportarBanco() {
+        const itens = await this.getAllItens();
+        const movimentacoes = await this.getMovimentacoes(365);
+        return { itens, movimentacoes };
+    }
+
+    async importarBanco(dados) {
+        const { itens, movimentacoes } = dados;
+        
+        await this.dbRun('DELETE FROM movimentacoes');
+        await this.dbRun('DELETE FROM itens');
+        
+        let itensImportados = 0;
+        let movimentacoesImportadas = 0;
+        
+        for (const item of itens) {
+            await this.dbRun(`
                 INSERT INTO itens (nome, serie, descricao, origem, destino, valor, nf, quantidade, minimo, ideal, infos)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `;
-            
-            db.run(sql, [
-                item.nome, item.serie, item.descricao, item.origem, item.destino,
-                item.valor, item.nf, item.quantidade, item.minimo, item.ideal, item.infos
-            ], function(err) {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(this.lastID);
-                }
-            });
-        });
-    }
-
-    // Buscar todos os itens
-    function buscarItens() {
-        return new Promise((resolve, reject) => {
-            const sql = `SELECT * FROM itens ORDER BY nome`;
-            
-            db.all(sql, [], (err, rows) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(rows);
-                }
-            });
-        });
-    }
-
-    // Buscar item por ID
-    function buscarItemPorId(id) {
-        return new Promise((resolve, reject) => {
-            const sql = `SELECT * FROM itens WHERE id = ?`;
-            
-            db.get(sql, [id], (err, row) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(row);
-                }
-            });
-        });
-    }
-
-    // Atualizar quantidade do item
-    function atualizarQuantidade(id, novaQuantidade) {
-        return new Promise((resolve, reject) => {
-            const sql = `UPDATE itens SET quantidade = ? WHERE id = ?`;
-            
-            db.run(sql, [novaQuantidade, id], function(err) {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(this.changes);
-                }
-            });
-        });
-    }
-
-    // Remover item
-    function removerItem(id) {
-        return new Promise((resolve, reject) => {
-            const sql = `DELETE FROM itens WHERE id = ?`;
-            
-            db.run(sql, [id], function(err) {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(this.changes);
-                }
-            });
-        });
-    }
-
-    // Inserir movimentação
-    function inserirMovimentacao(movimentacao) {
-        return new Promise((resolve, reject) => {
-            const sql = `
-                INSERT INTO movimentacoes (item_id, item_nome, tipo, quantidade, destino, descricao)
-                VALUES (?, ?, ?, ?, ?, ?)
-            `;
-            
-            db.run(sql, [
-                movimentacao.itemId, movimentacao.itemNome, movimentacao.tipo,
-                movimentacao.quantidade, movimentacao.destino, movimentacao.descricao
-            ], function(err) {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(this.lastID);
-                }
-            });
-        });
-    }
-
-    // Buscar movimentações por período
-    function buscarMovimentacoes(dias = 30) {
-        return new Promise((resolve, reject) => {
-            const sql = `
-                SELECT * FROM movimentacoes 
-                WHERE data >= datetime('now', '-${dias} days')
-                ORDER BY data DESC
-            `;
-            
-            db.all(sql, [], (err, rows) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(rows);
-                }
-            });
-        });
-    }
-
-    // Função utilitária para executar comandos SQL genéricos (como DELETE)
-    function run(sql, params = []) {
-        return new Promise((resolve, reject) => {
-            db.run(sql, params, function(err) {
-                if (err) reject(err);
-                else resolve(this);
-            });
-        });
-    }
-
-    // Fechar conexão
-    function fecharConexao() {
-        db.close((err) => {
-            if (err) {
-                console.error('Erro ao fechar banco:', err.message);
-            } else {
-                console.log('Conexão com banco fechada.');
+            `, [item.nome, item.serie, item.descricao, item.origem, item.destino, item.valor, 
+                item.nf, item.quantidade, item.minimo, item.ideal, item.infos]);
+            itensImportados++;
+        }
+        
+        if (movimentacoes && movimentacoes.length > 0) {
+            for (const mov of movimentacoes) {
+                await this.dbRun(`
+                    INSERT INTO movimentacoes (item_id, item_nome, tipo, quantidade, origem, destino, descricao, data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                `, [mov.item_id, mov.item_nome, mov.tipo, mov.quantidade, mov.origem, mov.destino, mov.descricao, mov.data]);
+                movimentacoesImportadas++;
             }
-        });
+        }
+        
+        return { itensImportados, movimentacoesImportadas };
     }
 
-    // Verificar estado do banco de dados
-    function verificarBanco() {
-        return new Promise((resolve, reject) => {
-            db.get("PRAGMA integrity_check", [], (err, result) => {
-                if (err) {
-                    console.error("Erro ao verificar integridade do banco:", err.message);
-                    reject(err);
-                } else {
-                    if (result.integrity_check === 'ok') {
-                        console.log("Banco de dados íntegro e pronto para uso");
-                        resolve(true);
-                    } else {
-                        console.warn("Problemas de integridade no banco:", result.integrity_check);
-                        resolve(false);
-                    }
-                }
-            });
-        });
-    }
-
-    // Funções para exportar e importar dados (para sincronização entre diferentes máquinas)
-    async function exportarDados() {
+    async healthCheck() {
         try {
-            // Exportar tabela de itens
-            const itens = await buscarItens();
-            
-            // Exportar tabela de movimentações (últimos 365 dias para não ficar muito grande)
-            const movimentacoes = await buscarMovimentacoes(365);
-            
-            return {
-                itens,
-                movimentacoes,
-                timestamp: new Date().toISOString(),
-                versao: '1.0'
-            };
+            await this.dbGet('SELECT 1');
+            return { status: 'connected' };
         } catch (error) {
-            console.error('Erro ao exportar dados:', error);
-            throw error;
-        }
-    }
-    // --- PACOTES DE REQUISIÇÃO ---
-    // 1. Corrigir a função criarPacoteRequisicao (problema com Promise)
-function criarPacoteRequisicao(pacote, itens) {
-    return new Promise((resolve, reject) => {
-        db.run(
-            `INSERT INTO pacotes_requisicao (userId, centroCusto, projeto, justificativa, status) VALUES (?, ?, ?, ?, 'PENDENTE')`,
-            [pacote.userId, pacote.centroCusto, pacote.projeto, pacote.justificativa],
-            function (err) {
-                if (err) {
-                    console.error('Erro ao criar pacote:', err);
-                    return reject(err);
-                }
-                const pacoteId = this.lastID;
-                
-                // Inserir itens do pacote usando Promise.all para melhor controle
-                const promises = itens.map(item => {
-                    return new Promise((resolveItem, rejectItem) => {
-                        db.run(
-                            `INSERT INTO itens_pacote (pacoteId, itemId, quantidade, status) VALUES (?, ?, ?, 'PENDENTE')`,
-                            [pacoteId, item.itemId, item.quantidade],
-                            function(err) {
-                                if (err) rejectItem(err);
-                                else resolveItem(this.lastID);
-                            }
-                        );
-                    });
-                });
-                
-                Promise.all(promises)
-                    .then(() => resolve(pacoteId))
-                    .catch(reject);
-            }
-        );
-    });
-}
-
-    function buscarPacotesUsuario(userId) {
-    return new Promise((resolve, reject) => {
-        db.all(
-            `SELECT pr.*, u.name as userName 
-             FROM pacotes_requisicao pr 
-             JOIN usuarios u ON pr.userId = u.id 
-             WHERE pr.userId = ? 
-             ORDER BY pr.data DESC`,
-            [userId],
-            (err, rows) => {
-                if (err) {
-                    console.error('Erro ao buscar pacotes do usuário:', err);
-                    reject(err);
-                } else {
-                    resolve(rows);
-                }
-            }
-        );
-    });
-}
-
-
-
-    function buscarItensPacote(pacoteId) {
-    return new Promise((resolve, reject) => {
-        db.all(
-            `SELECT ip.*, i.nome as itemNome, i.quantidade as estoqueAtual 
-             FROM itens_pacote ip 
-             JOIN itens i ON ip.itemId = i.id 
-             WHERE ip.pacoteId = ?`,
-            [pacoteId],
-            (err, rows) => {
-                if (err) {
-                    console.error('Erro ao buscar itens do pacote:', err);
-                    reject(err);
-                } else {
-                    resolve(rows);
-                }
-            }
-        );
-    });
-}
-
-// 5. Função para debug - verificar estrutura das tabelas
-function verificarEstruturaBanco() {
-    return new Promise((resolve, reject) => {
-        const queries = [
-            "SELECT name FROM sqlite_master WHERE type='table'",
-            "PRAGMA table_info(pacotes_requisicao)",
-            "PRAGMA table_info(itens_pacote)",
-            "SELECT COUNT(*) as total FROM pacotes_requisicao",
-            "SELECT COUNT(*) as total FROM itens_pacote"
-        ];
-        
-        const results = {};
-        
-        Promise.all(queries.map((query, index) => {
-            return new Promise((res, rej) => {
-                if (index === 0) {
-                    db.all(query, [], (err, rows) => {
-                        if (err) rej(err);
-                        else res({ query, rows });
-                    });
-                } else {
-                    db.all(query, [], (err, rows) => {
-                        if (err) rej(err);
-                        else res({ query, rows });
-                    });
-                }
-            });
-        }))
-        .then(allResults => {
-            allResults.forEach(result => {
-                console.log(`Resultado para: ${result.query}`, result.rows);
-            });
-            resolve(allResults);
-        })
-        .catch(reject);
-    });
-}
-   
-// 3. Corrigir buscarPacotesPendentes para incluir informações do usuário
-function buscarPacotesPendentes() {
-    return new Promise((resolve, reject) => {
-        db.all(
-            `SELECT pr.*, u.name as userName 
-             FROM pacotes_requisicao pr 
-             JOIN usuarios u ON pr.userId = u.id 
-             WHERE pr.status IN ('PENDENTE', 'PARCIAL') 
-             ORDER BY pr.data ASC`,
-            [],
-            (err, rows) => {
-                if (err) {
-                    console.error('Erro ao buscar pacotes pendentes:', err);
-                    reject(err);
-                } else {
-                    resolve(rows);
-                }
-            }
-        );
-    });
-}
-
-
-    function atualizarStatusItemPacote(itemPacoteId, status, observacoes = null) {
-        return new Promise((resolve, reject) => {
-            db.run(
-                `UPDATE itens_pacote SET status = ?, observacoes = ? WHERE id = ?`,
-                [status, observacoes, itemPacoteId],
-                function (err) {
-                    if (err) reject(err);
-                    else resolve(this.changes);
-                }
-            );
-        });
-    }
-
-    function atualizarStatusPacote(pacoteId, status) {
-        return new Promise((resolve, reject) => {
-            db.run(
-                `UPDATE pacotes_requisicao SET status = ? WHERE id = ?`,
-                [status, pacoteId],
-                function (err) {
-                    if (err) reject(err);
-                    else resolve(this.changes);
-                }
-            );
-        });
-    }
-
-    function buscarItemPacotePorId(itemPacoteId) {
-        return new Promise((resolve, reject) => {
-            db.get(
-                `SELECT ip.*, i.nome as itemNome FROM itens_pacote ip JOIN itens i ON ip.itemId = i.id WHERE ip.id = ?`,
-                [itemPacoteId],
-                (err, row) => {
-                    if (err) reject(err);
-                    else resolve(row);
-                }
-            );
-        });
-    }
-
-    function buscarPacotePorId(pacoteId) {
-        return new Promise((resolve, reject) => {
-            db.get(
-                `SELECT * FROM pacotes_requisicao WHERE id = ?`,
-                [pacoteId],
-                (err, row) => {
-                    if (err) reject(err);
-                    else resolve(row);
-                }
-            );
-        });
-    }
-
-    async function importarDados(dados) {
-        if (!dados || !dados.itens) {
-            throw new Error('Dados inválidos para importação');
-        }
-        
-        try {
-            // Iniciar transação para garantir atomicidade da operação
-            await run('BEGIN TRANSACTION');
-            
-            // Limpar tabelas existentes
-            await run('DELETE FROM movimentacoes');
-            await run('DELETE FROM itens');
-            
-            // Inserir itens
-            for (const item of dados.itens) {
-                // Remover o ID para evitar conflitos com a sequência do autoincrement
-                const { id, data_cadastro, ...itemSemId } = item;
-                await inserirItem(itemSemId);
-            }
-            
-            if (dados.movimentacoes && Array.isArray(dados.movimentacoes)) {
-                for (const mov of dados.movimentacoes) {
-                    // Formatar dados para inserção
-                    const movimentacao = {
-                        itemId: mov.item_id,
-                        itemNome: mov.item_nome,
-                        tipo: mov.tipo,
-                        quantidade: mov.quantidade,
-                        destino: mov.destino,
-                        descricao: mov.descricao
-                    };
-                    
-                    await inserirMovimentacao(movimentacao);
-                }
-            }
-            
-            // Confirmar transação
-            await run('COMMIT');
-            
-            return {
-                sucesso: true,
-                itensImportados: dados.itens.length,
-                movimentacoesImportadas: dados.movimentacoes ? dados.movimentacoes.length : 0
-            };
-        } catch (error) {
-            // Reverter alterações em caso de erro
-            await run('ROLLBACK');
-            console.error('Erro ao importar dados:', error);
-            throw error;
+            return { status: 'error', error: error.message };
         }
     }
 
-    // Função para unificar itens duplicados
-    async function unificarItensDuplicados() {
-        try {
-            // Começar uma transação
-            await run('BEGIN TRANSACTION');
-
-            // Buscar itens duplicados por nome+serie
-            const duplicados = await new Promise((resolve, reject) => {
-                db.all(`
-                    SELECT nome, serie, COUNT(*) as count, GROUP_CONCAT(id) as ids
-                    FROM itens
-                    GROUP BY nome, serie
-                    HAVING COUNT(*) > 1
-                `, [], (err, rows) => {
-                    if (err) reject(err);
-                    else resolve(rows);
-                });
-            });
-
-            let totalUnificados = 0;
-
-            for (const grupo of duplicados) {
-                const ids = grupo.ids.split(',').map(Number);
-                const [idPrincipal, ...idsParaUnificar] = ids;
-
-                // Somar as quantidades dos itens duplicados
-                const itensParaUnificar = await Promise.all(idsParaUnificar.map(id => buscarItemPorId(id)));
-                const itemPrincipal = await buscarItemPorId(idPrincipal);
-
-                const novaQuantidade = itensParaUnificar.reduce(
-                    (total, item) => total + (item ? item.quantidade : 0),
-                    itemPrincipal.quantidade
-                );
-
-                // Atualizar o item principal com a soma das quantidades
-                await run(
-                    'UPDATE itens SET quantidade = ? WHERE id = ?',
-                    [novaQuantidade, idPrincipal]
-                );
-
-                // Atualizar movimentações para apontar para o item principal
-                if (idsParaUnificar.length > 0) {
-                    const placeholders = idsParaUnificar.map(() => '?').join(',');
-                    await run(
-                        `UPDATE movimentacoes SET item_id = ? WHERE item_id IN (${placeholders})`,
-                        [idPrincipal, ...idsParaUnificar]
-                    );
-                    // Deletar os itens duplicados
-                    await run(
-                        `DELETE FROM itens WHERE id IN (${placeholders})`,
-                        idsParaUnificar
-                    );
-                    totalUnificados += idsParaUnificar.length;
+    close() {
+        if (this.db) {
+            this.db.close((err) => {
+                if (err) {
+                    console.error('Erro ao fechar conexão com o banco:', err.message);
+                } else {
+                    console.log('Conexão com o banco fechada com sucesso.');
                 }
-            }
-
-            // Confirmar as alterações
-            await run('COMMIT');
-
-            return {
-                total: totalUnificados,
-                message: `${totalUnificados} itens duplicados foram unificados com sucesso.`
-            };
-        } catch (error) {
-            // Em caso de erro, reverter todas as alterações
-            await run('ROLLBACK');
-            throw error;
+            });
         }
     }
-
-    // Funções de requisições
-    function criarRequisicao(requisicao) {
-        return new Promise((resolve, reject) => {
-            const sql = `INSERT INTO requisicoes (userId, itemId, quantidade, centroCusto, projeto, justificativa) 
-                        VALUES (?, ?, ?, ?, ?, ?)`;
-            db.run(sql, [
-                requisicao.userId,
-                requisicao.itemId,
-                requisicao.quantidade,
-                requisicao.centroCusto,
-                requisicao.projeto,
-                requisicao.justificativa
-            ], function(err) {
-                if (err) reject(err);
-                else resolve(this.lastID);
-            });
-        });
-    }
-
-    function buscarRequisicoesUsuario(userId) {
-        return new Promise((resolve, reject) => {
-            const sql = `
-                SELECT r.*, i.nome as item_nome, u.name as usuario_nome
-                FROM requisicoes r
-                JOIN itens i ON r.itemId = i.id
-                JOIN usuarios u ON r.userId = u.id
-                WHERE r.userId = ?
-                ORDER BY r.data DESC`;
-            db.all(sql, [userId], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows);
-            });
-        });
-    }
-
-    function buscarRequisicoesPendentes() {
-        return new Promise((resolve, reject) => {
-            const sql = `
-                SELECT r.*, i.nome as item_nome, u.name as usuario_nome
-                FROM requisicoes r
-                JOIN itens i ON r.itemId = i.id
-                JOIN usuarios u ON r.userId = u.id
-                WHERE r.status = 'pendente'
-                ORDER BY r.data ASC`;
-            db.all(sql, (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows);
-            });
-        });
-    }
-
-    function atualizarStatusRequisicao(id, status, observacoes = null) {
-        return new Promise((resolve, reject) => {
-            const sql = `UPDATE requisicoes SET status = ?, observacoes = ? WHERE id = ?`;
-            db.run(sql, [status, observacoes, id], function(err) {
-                if (err) reject(err);
-                else resolve(this.changes);
-            });
-        });
-    }
-
-    // Atualiza o estoque ao aprovar requisição
-    function descontarEstoque(itemId, quantidade) {
-        return new Promise((resolve, reject) => {
-            const sql = `UPDATE itens SET quantidade = quantidade - ? WHERE id = ? AND quantidade >= ?`;
-            db.run(sql, [quantidade, itemId, quantidade], function(err) {
-                if (err) reject(err);
-                else resolve(this.changes);
-            });
-        });
-    }
-
-    async function buscarRequisicaoPorId(id) {
-        return new Promise((resolve, reject) => {
-            const query = `
-                SELECT 
-                    r.id,
-                    r.userId,
-                    r.itemId,
-                    r.quantidade,
-                    r.centroCusto,
-                    r.projeto,
-                    r.justificativa,
-                    r.status,
-                    r.observacoes,
-                    r.data,
-                    u.name as userName,
-                    i.nome as itemNome,
-                    i.descricao as itemDescricao
-                FROM requisicoes r
-                JOIN usuarios u ON r.userId = u.id
-                JOIN itens i ON r.itemId = i.id
-                WHERE r.id = ?
-            `;
-            
-            db.get(query, [id], (err, row) => {
-                if (err) {
-                    console.error('Erro ao buscar requisição por ID:', err);
-                    reject(err);
-                } else {
-                    resolve(row);
-                }
-            });
-        });
-    }
-
-   // 1. Adicionar a função buscarItemPorNomeEWBS que está faltando:
-function buscarItemPorNomeEWBS(nome, serie) {
-    return new Promise((resolve, reject) => {
-        const sql = `SELECT * FROM itens WHERE nome = ? AND serie = ?`;
-        
-        db.get(sql, [nome, serie], (err, row) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve(row);
-            }
-        });
-    });
 }
 
-// 2. Adicionar a função atualizarQuantidadeItem que também está faltando:
-function atualizarQuantidadeItem(id, novaQuantidade) {
-    return new Promise((resolve, reject) => {
-        const sql = `UPDATE itens SET quantidade = ? WHERE id = ?`;
-        
-        db.run(sql, [novaQuantidade, id], function(err) {
-            if (err) {
-                reject(err);
-            } else {
-                resolve(this.changes);
-            }
-        });
-    });
-}
-
-// 3. Adicionar essas funções no module.exports:
-momodule.exports = {
-    // Funções de usuários
-    buscarUsuarioPorEmail,
-    cadastrarUsuario,
-    autenticarUsuario,
-    
-    // Funções de itens
-    inserirItem,
-    buscarItens,
-    buscarItemPorId,
-    buscarItemPorNomeEWBS,
-    atualizarQuantidade,
-    atualizarQuantidadeItem,
-    removerItem,
-    
-    // Funções de movimentações
-    inserirMovimentacao,
-    buscarMovimentacoes,
-    
-    // Funções de requisições individuais (compatibilidade)
-    criarRequisicao,
-    buscarRequisicoesUsuario,
-    buscarRequisicoesPendentes,
-    atualizarStatusRequisicao,
-    buscarRequisicaoPorId,
-    
-    // Funções de pacotes de requisição (CORRIGIDAS)
-    criarPacoteRequisicao,
-    buscarPacotesUsuario,
-    buscarItensPacote,
-    buscarPacotesPendentes,
-    atualizarStatusItemPacote,
-    atualizarStatusPacote,
-    buscarItemPacotePorId,
-    buscarPacotePorId,
-    
-    // Funções utilitárias
-    descontarEstoque,
-    fecharConexao,
-    verificarBanco,
-    verificarEstruturaBanco, // NOVA
-    run,
-    exportarDados,
-    importarDados,
-    unificarItensDuplicados
-};
+// Criar e exportar instância única do DatabaseManager
+const dbManager = new DatabaseManager();
+module.exports = dbManager;
