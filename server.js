@@ -1,3 +1,17 @@
+const express = require('express');
+const path = require('path');
+const cors = require('cors');
+const db = require('./database');
+
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Servir arquivos estáticos
+app.use(express.static(__dirname));
+
 // --- PACOTES DE REQUISIÇÃO ---
 // Criar novo pacote de requisição
 app.post('/api/pacotes', async (req, res) => {
