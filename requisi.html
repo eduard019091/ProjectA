@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="main.css">
+    <link rel="icon" type="image/png" href="andritzlogo2.png">
+    <title>Sistema de Requisições</title>
+</head>
+<body>
+    <div class="container">
+        <div class="header-content">
+            <img src="./andritzlogo.png" alt="Andritz Logo" class="logo">
+        </div>
+        <div class="header">
+            <h1>Sistema de Requisições</h1>
+            <div class="nav-buttons">
+                <button class="nav-btn active" onclick="showSection('novaRequisicao')">Nova Requisição</button>
+                <button class="nav-btn" onclick="showSection('minhasRequisicoes')">Minhas Requisições</button>
+                <button class="nav-btn admin-only" onclick="showSection('aprovarRequisicoes')" style="display: none;">Aprovar Requisições</button>
+
+
+                <button class="nav-btn btn-voltar-estoque" id="btnVoltarEstoque" style="display: none;">Voltar ao Estoque</button>
+            </div>
+        </div>
+
+        <!-- Indicador de loading -->
+        <div id="loading" class="loading" style="display: none;">
+            <p>Carregando dados do usuário...</p>
+        </div>
+
+        <!-- Mensagem de acesso negado -->
+        <div id="accessDenied" class="access-denied" style="display: none;">
+            <h2>Acesso Negado</h2>
+            <p>Você não tem permissão para acessar esta página.</p>
+            <button class="btn" onclick="window.location.href='login.html'">Voltar ao Login</button>
+        </div>
+
+        <!-- Nova Requisição -->
+        <div id="novaRequisicao" class="content section active">
+            <h3>Pacote de Requisição (<span id="contadorPacote">0 tipos de itens, 0 unidades</span>)</h3>
+            <form id="requisicaoForm" onsubmit="return false;">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="itemRequisicao">Item:</label>
+                        <select id="itemRequisicao" required>
+                            <option value="">Selecione um item...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="quantidadeRequisicao">Quantidade:</label>
+                        <input type="number" id="quantidadeRequisicao" required min="1">
+                    </div>
+                    <div class="form-group">
+                        <button type="button" class="btn" onclick="adicionarItemPacote()">Adicionar Item</button>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="centroCusto">Centro de Custo:</label>
+                        <input type="text" id="centroCusto" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="projeto">Projeto/WBS:</label>
+                        <input type="text" id="projeto" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="justificativa">Justificativa:</label>
+                    <textarea id="justificativa" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Itens do Pacote:</label>
+                    <table id="tabelaPacoteItens" class="table-pacote-itens">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Quantidade</th>
+                                <th>Ação</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div class="form-group">
+                    <button type="button" class="btn btn-danger" onclick="limparPacote()">Limpar Pacote</button>
+                    <button type="button" class="btn" onclick="enviarPacoteRequisicao()">Enviar Pacote de Requisição</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Minhas Requisições -->
+        <div id="minhasRequisicoes" class="content section">
+            <h2>Minhas Requisições</h2>
+            <div class="table-container">
+                <table id="tabelaMinhasRequisicoes">
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Item</th>
+                            <th>Quantidade</th>
+                            <th>Centro de Custo</th>
+                            <th>Status</th>
+                            <th>Observações</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Aprovar Requisições (Admin) -->
+        <div id="aprovarRequisicoes" class="content section">
+            <h2>Aprovar Requisições</h2>
+            <div class="table-container">
+                <table id="tabelaAprovarRequisicoes">
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Solicitante</th>
+                            <th>Item</th>
+                            <th>Quantidade</th>
+                            <th>Centro de Custo</th>
+                            <th>Projeto</th>
+                            <th>Justificativa</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Lógica para Pacote de Itens ---
+        let pacoteItens = [];
+
+        function adicionarItemPacote() {
+            const itemSelect = document.getElementById('itemRequisicao');
+            const quantidadeInput = document.getElementById('quantidadeRequisicao');
+            const itemId = itemSelect.value;
+            const itemNome = itemSelect.options[itemSelect.selectedIndex].text;
+            const quantidade = quantidadeInput.value;
+            if (!itemId || !quantidade || quantidade < 1) {
+                alert('Selecione um item e informe uma quantidade válida.');
+                return;
+            }
+            pacoteItens.push({ itemId, itemNome, quantidade });
+            atualizarTabelaPacoteItens();
+            // Limpar seleção
+            itemSelect.value = '';
+            quantidadeInput.value = '';
+        }
+
+        function removerItemPacote(index) {
+            pacoteItens.splice(index, 1);
+            atualizarTabelaPacoteItens();
+        }
+
+        function atualizarTabelaPacoteItens() {
+            const tbody = document.querySelector('#tabelaPacoteItens tbody');
+            tbody.innerHTML = '';
+            pacoteItens.forEach((item, idx) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${item.itemNome}</td>
+                    <td>${item.quantidade}</td>
+                    <td><button type="button" class="btn" onclick="removerItemPacote(${idx})">Remover</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function enviarPacoteRequisicao() {
+            if (pacoteItens.length === 0) {
+                alert('Adicione pelo menos um item ao pacote.');
+                return;
+            }
+            const centroCusto = document.getElementById('centroCusto').value;
+            const projeto = document.getElementById('projeto').value;
+            const justificativa = document.getElementById('justificativa').value;
+            if (!centroCusto || !projeto) {
+                alert('Preencha todos os campos obrigatórios.');
+                return;
+            }
+            const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+            fetch('/api/pacotes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: userData.id,
+                    centroCusto,
+                    projeto,
+                    justificativa,
+                    itens: pacoteItens.map(i => ({ itemId: i.itemId, quantidade: i.quantidade }))
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Pacote de requisição enviado!');
+                    pacoteItens = [];
+                    atualizarTabelaPacoteItens();
+                    document.getElementById('requisicaoForm').reset();
+                    carregarMinhasRequisicoes();
+                } else {
+                    alert(data.message || 'Erro ao enviar pacote.');
+                }
+            })
+            .catch(() => alert('Erro ao enviar pacote.'));
+        }
+
+        // Função para verificar se o usuário é admin
+        function isUserAdmin() {
+            const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+            return userData.userType === 'admin';
+        }
+
+        // Função para configurar visibilidade dos elementos baseado no tipo de usuário
+        function configureUserInterface() {
+            const isAdmin = isUserAdmin();
+            // Mostrar/ocultar botão "Voltar ao Estoque" para usuários não-admin
+            const btnVoltar = document.getElementById('btnVoltarEstoque');
+            if (btnVoltar) {
+                btnVoltar.style.display = isAdmin ? 'block' : 'none';
+                btnVoltar.onclick = function() {
+                    window.location.href = 'index.html';
+                };
+            }
+            
+            // Mostrar/ocultar seção de aprovar requisições baseado no tipo de usuário
+            const adminButtons = document.querySelectorAll('.admin-only');
+    <main>
+        <section id="requisicao-pacote-section">
+            <h2>Nova Requisição de Pacote</h2>
+            <form id="form-pacote" autocomplete="off">
+                <div class="form-row">
+                    <label for="centroCusto">Centro de Custo:</label>
+                    <input type="text" id="centroCusto" name="centroCusto" required maxlength="50" placeholder="Digite o centro de custo" />
+                </div>
+                <div class="form-row">
+                    <label for="projeto">Projeto:</label>
+                    <input type="text" id="projeto" name="projeto" required maxlength="50" placeholder="Digite o projeto" />
+                </div>
+                <div class="form-row">
+                    <label for="justificativa">Justificativa:</label>
+                    <textarea id="justificativa" name="justificativa" required maxlength="200" placeholder="Descreva a justificativa"></textarea>
+                </div>
+                <fieldset class="form-row" id="fieldset-itens">
+                    <legend>Adicionar Item ao Pacote</legend>
+                    <label for="itemSelect">Item:</label>
+                    <select id="itemSelect" required></select>
+                    <label for="quantidade">Quantidade:</label>
+                    <input type="number" id="quantidade" name="quantidade" min="1" required placeholder="Qtd" />
+                    <button type="button" id="adicionarItemBtn">Adicionar</button>
+                </fieldset>
+                <div class="form-row">
+                    <button type="submit" id="enviarPacoteBtn">Enviar Pacote</button>
+                    <button type="button" id="limparPacoteBtn">Limpar</button>
+                </div>
+                <div id="mensagemPacote" class="mensagem" aria-live="polite"></div>
+            </form>
+            <div id="pacoteItensContainer">
+                <h3>Itens do Pacote <span id="contadorItensPacote">(0)</span></h3>
+                <table id="pacoteItensTable" class="tabela-responsive">
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Quantidade</th>
+                            <th>Estoque Atual</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+        <section id="minhas-requisicoes-section">
+            <h2>Meus Pacotes de Requisição</h2>
+            <table id="minhasRequisicoesTable" class="tabela-responsive">
+                <thead>
+                    <tr>
+                        <th>ID Pacote</th>
+                        <th>Centro de Custo</th>
+                        <th>Projeto</th>
+                        <th>Justificativa</th>
+                        <th>Status</th>
+                        <th>Data</th>
+                        <th>Itens</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+        <section id="aprovacao-section">
+            <h2>Aprovação de Pacotes</h2>
+            <table id="aprovacaoPacotesTable" class="tabela-responsive">
+                <thead>
+                    <tr>
+                        <th>ID Pacote</th>
+                        <th>Usuário</th>
+                        <th>Centro de Custo</th>
+                        <th>Projeto</th>
+                        <th>Justificativa</th>
+                        <th>Status</th>
+                        <th>Data</th>
+                        <th>Itens</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+    </main>
+            // Proteger acesso ao estoque - apenas verificar se estamos na página index.html
+            let userData = {};
+            try {
+                userData = JSON.parse(sessionStorage.getItem('currentUser')) || {};
+            } catch {}
+            if (!userData.userType) {
+                try {
+                    userData = JSON.parse(localStorage.getItem('userData')) || {};
+                } catch {}
+            }
+            if (window.location.pathname.endsWith('index.html') && userData.userType !== 'admin') {
+                alert('Acesso negado! Apenas administradores podem acessar o sistema de estoque.');
+                window.location.href = 'requisi.html';
+                return;
+            }
+            // Carregar itens para o select (exemplo estático, adapte para seu backend)
+            const select = document.getElementById('itemRequisicao');
+            if (select && select.options.length <= 1) {
+                const itensExemplo = [
+                    { id: '1', nome: 'Parafuso' },
+                    { id: '2', nome: 'Porca' },
+                    { id: '3', nome: 'Arruela' }
+                ];
+                itensExemplo.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.id;
+                    opt.text = item.nome;
+                    select.appendChild(opt);
+                });
+            }
+
+            // Carregar requisições do usuário
+            carregarMinhasRequisicoes();
+            // Carregar requisições pendentes (se admin)
+            if (isUserAdmin()) {
+                carregarRequisicoesParaAprovar();
+            }
+        }
+
+        // Inicializar quando a página carregar
+        document.addEventListener('DOMContentLoaded', inicializarSistema);
+    </script>
+
+    <script src="requisi.js"></script>
+
+    <script>
+    // --- Minhas Requisições (usuário) ---
+    function carregarMinhasRequisicoes() {
+        const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+        fetch(`/api/pacotes/usuario/${userData.id}`)
+            .then(res => res.json())
+            .then(pacotes => {
+                const tbody = document.querySelector('#tabelaMinhasRequisicoes tbody');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+                pacotes.forEach(req => {
+                    (req.itens || []).forEach((item) => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${new Date(req.data).toLocaleString()}</td>
+                            <td>${item.itemNome}</td>
+                            <td>${item.quantidade}</td>
+                            <td>${req.centroCusto}</td>
+                            <td>${item.status}</td>
+                            <td>${item.status !== 'PENDENTE' ? (item.status === 'NEGADO' ? 'Negado pelo admin' : 'Aprovado') : ''}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                });
+            });
+    }
+
+    // --- Aprovação de Pacotes (admin) ---
+    function carregarRequisicoesParaAprovar() {
+        fetch('/api/pacotes/pendentes')
+            .then(res => res.json())
+            .then(pacotes => {
+                const tbody = document.querySelector('#tabelaAprovarRequisicoes tbody');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+                pacotes.forEach((req) => {
+                    (req.itens || []).forEach((item) => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${new Date(req.data).toLocaleString()}</td>
+                            <td>${req.userId}</td>
+                            <td>${item.itemNome}</td>
+                            <td>${item.quantidade}</td>
+                            <td>${req.centroCusto}</td>
+                            <td>${req.projeto}</td>
+                            <td>${req.justificativa}</td>
+                            <td>
+                                <button class="btn" onclick="aprovarItem(${item.id})" ${item.status !== 'PENDENTE' ? 'disabled' : ''}>Aprovar</button>
+                                <button class="btn" onclick="negarItem(${item.id})" ${item.status !== 'PENDENTE' ? 'disabled' : ''}>Negar</button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                    // Ações para o pacote inteiro
+                    const trPacote = document.createElement('tr');
+                    trPacote.innerHTML = `
+                        <td colspan="8" style="text-align:right; background:#f9f9f9;">
+                            <button class="btn" onclick="aprovarPacote(${req.id})">Aprovar Pacote</button>
+                            <button class="btn" onclick="negarPacote(${req.id})">Negar Pacote</button>
+                        </td>
+                    `;
+                    tbody.appendChild(trPacote);
+                });
+            });
+    }
+
+    function aprovarItem(itemPacoteId) {
+        fetch(`/api/pacotes/item/${itemPacoteId}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'APROVADO' })
+        })
+        .then(res => res.json())
+        .then(() => {
+            carregarRequisicoesParaAprovar();
+            carregarMinhasRequisicoes();
+        });
+    }
+
+    function negarItem(itemPacoteId) {
+        fetch(`/api/pacotes/item/${itemPacoteId}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'NEGADO' })
+        })
+        .then(res => res.json())
+        .then(() => {
+            carregarRequisicoesParaAprovar();
+            carregarMinhasRequisicoes();
+        });
+    }
+
+    function aprovarPacote(pacoteId) {
+        fetch(`/api/pacotes/${pacoteId}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'APROVADO' })
+        })
+        .then(res => res.json())
+        .then(() => {
+            carregarRequisicoesParaAprovar();
+            carregarMinhasRequisicoes();
+        });
+    }
+
+    function negarPacote(pacoteId) {
+        fetch(`/api/pacotes/${pacoteId}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'NEGADO' })
+        })
+        .then(res => res.json())
+        .then(() => {
+            carregarRequisicoesParaAprovar();
+            carregarMinhasRequisicoes();
+        });
+    }
+
+    </script>
+</body>
+</html>
