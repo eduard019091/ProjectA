@@ -3,6 +3,8 @@ const path = require('path');
 const cors = require('cors');
 const db = require('./database');
 
+const app = express();
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
@@ -104,21 +106,6 @@ app.post('/api/pacotes/:pacoteId/status', async (req, res) => {
         res.status(500).json({ success: false, message: 'Erro ao atualizar status do pacote.' });
     }
 });
-const express = require('express');
-const path = require('path');
-const cors = require('cors');
-const db = require('./database');
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Servir arquivos estáticos
-app.use(express.static(__dirname));
 
 // Rotas de autenticação
 app.post('/api/login', async (req, res) => {
@@ -312,6 +299,317 @@ app.post('/api/unificar-itens', async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Erro ao unificar itens: ' + error.message
+        });
+    }
+});
+
+// Rota para atualizar item completo
+app.put('/api/itens/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const itemData = req.body;
+        
+        // Verificar se o item existe
+        const itemExistente = await db.buscarItemPorId(id);
+        if (!itemExistente) {
+            return res.status(404).json({
+                success: false,
+                message: 'Item não encontrado'
+            });
+        }
+
+        // Atualizar item no banco de dados
+        const sql = `
+            UPDATE itens SET 
+                nome = ?, 
+                serie = ?, 
+                descricao = ?, 
+                origem = ?, 
+                destino = ?, 
+                valor = ?, 
+                nf = ?, 
+                quantidade = ?, 
+                minimo = ?, 
+                ideal = ?, 
+                infos = ?
+            WHERE id = ?
+        `;
+
+        await db.run(sql, [
+            itemData.nome || itemExistente.nome,
+            itemData.serie || itemExistente.serie,
+            itemData.descricao || itemExistente.descricao,
+            itemData.origem || itemExistente.origem,
+            itemData.destino || itemExistente.destino,
+            itemData.valor || itemExistente.valor,
+            itemData.nf || itemExistente.nf,
+            itemData.quantidade !== undefined ? itemData.quantidade : itemExistente.quantidade,
+            itemData.minimo !== undefined ? itemData.minimo : itemExistente.minimo,
+            itemData.ideal !== undefined ? itemData.ideal : itemExistente.ideal,
+            itemData.infos || itemExistente.infos,
+            id
+        ]);
+
+        // Se a quantidade foi alterada, registrar movimentação
+        if (itemData.quantidade !== undefined && itemData.quantidade !== itemExistente.quantidade) {
+            const diferenca = itemData.quantidade - itemExistente.quantidade;
+            const tipo = diferenca > 0 ? 'entrada' : 'saida';
+            const quantidade = Math.abs(diferenca);
+
+            await db.inserirMovimentacao({
+                itemId: parseInt(id),
+                itemNome: itemData.nome || itemExistente.nome,
+                tipo: tipo,
+                quantidade: quantidade,
+                origem: tipo === 'entrada' ? 'Atualização de item' : null,
+                destino: tipo === 'saida' ? 'Atualização de item' : null,
+                descricao: `Quantidade ${tipo === 'entrada' ? 'aumentada' : 'diminuída'} via edição do item`
+            });
+        }
+
+        // Buscar item atualizado
+        const itemAtualizado = await db.buscarItemPorId(id);
+
+        res.json({
+            success: true,
+            message: 'Item atualizado com sucesso',
+            item: itemAtualizado
+        });
+    } catch (error) {
+        console.error('Erro ao atualizar item:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erro ao atualizar item',
+            error: error.message
+        });
+    }
+});
+
+// Rota alternativa para atualizar apenas campos específicos (PATCH)
+app.patch('/api/itens/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+        
+        // Verificar se o item existe
+        const itemExistente = await db.buscarItemPorId(id);
+        if (!itemExistente) {
+            return res.status(404).json({
+                success: false,
+                message: 'Item não encontrado'
+            });
+        }
+
+        // Construir query dinamicamente baseada nos campos enviados
+        const camposPermitidos = ['nome', 'serie', 'descricao', 'origem', 'destino', 'valor', 'nf', 'quantidade', 'minimo', 'ideal', 'infos'];
+        const camposParaAtualizar = [];
+        const valores = [];
+
+        Object.keys(updates).forEach(campo => {
+            if (camposPermitidos.includes(campo)) {
+                camposParaAtualizar.push(`${campo} = ?`);
+                valores.push(updates[campo]);
+            }
+        });
+
+        if (camposParaAtualizar.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Nenhum campo válido para atualizar'
+            });
+        }
+
+        valores.push(id); // Adicionar ID para a cláusula WHERE
+
+        const sql = `UPDATE itens SET ${camposParaAtualizar.join(', ')} WHERE id = ?`;
+        await db.run(sql, valores);
+
+        // Se a quantidade foi alterada, registrar movimentação
+        if (updates.quantidade !== undefined && updates.quantidade !== itemExistente.quantidade) {
+            const diferenca = updates.quantidade - itemExistente.quantidade;
+            const tipo = diferenca > 0 ? 'entrada' : 'saida';
+            const quantidade = Math.abs(diferenca);
+
+            await db.inserirMovimentacao({
+                itemId: parseInt(id),
+                itemNome: updates.nome || itemExistente.nome,
+                tipo: tipo,
+                quantidade: quantidade,
+                origem: tipo === 'entrada' ? 'Atualização parcial' : null,
+                destino: tipo === 'saida' ? 'Atualização parcial' : null,
+                descricao: `Quantidade ${tipo === 'entrada' ? 'aumentada' : 'diminuída'} via edição parcial`
+            });
+        }
+
+        // Buscar item atualizado
+        const itemAtualizado = await db.buscarItemPorId(id);
+
+        res.json({
+            success: true,
+            message: 'Item atualizado com sucesso',
+            item: itemAtualizado,
+            camposAtualizados: Object.keys(updates)
+        });
+    } catch (error) {
+        console.error('Erro ao atualizar item:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erro ao atualizar item',
+            error: error.message
+        });
+    }
+});
+
+// Rota para adicionar estoque ao item
+app.post('/api/itens/:id/adicionar', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { quantidade, origem, observacao } = req.body;
+
+        if (!quantidade || quantidade <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Quantidade deve ser um número positivo'
+            });
+        }
+
+        // Verificar se o item existe
+        const item = await db.buscarItemPorId(id);
+        if (!item) {
+            return res.status(404).json({
+                success: false,
+                message: 'Item não encontrado'
+            });
+        }
+
+        // Calcular nova quantidade
+        const novaQuantidade = item.quantidade + parseInt(quantidade);
+
+        // Atualizar estoque
+        await db.atualizarQuantidadeItem(id, novaQuantidade);
+
+        // Registrar movimentação
+        await db.inserirMovimentacao({
+            itemId: item.id,
+            itemNome: item.nome,
+            tipo: 'entrada',
+            quantidade: parseInt(quantidade),
+            origem: origem || 'Adição manual',
+            descricao: observacao || 'Adição manual ao estoque'
+        });
+
+        res.json({
+            success: true,
+            message: 'Estoque adicionado com sucesso',
+            quantidadeAnterior: item.quantidade,
+            quantidadeAdicionada: parseInt(quantidade),
+            novaQuantidade: novaQuantidade
+        });
+    } catch (error) {
+        console.error('Erro ao adicionar estoque:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erro ao adicionar estoque',
+            error: error.message
+        });
+    }
+});
+
+// Rota para retirada de item
+app.post('/api/itens/:id/retirar', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { quantidade, destino, observacao } = req.body;
+
+        if (!quantidade || !destino) {
+            return res.status(400).json({
+                success: false,
+                message: 'Quantidade e destino são obrigatórios'
+            });
+        }
+
+        // Verificar se o item existe
+        const item = await db.buscarItemPorId(id);
+        if (!item) {
+            return res.status(404).json({
+                success: false,
+                message: 'Item não encontrado'
+            });
+        }
+
+        // Verificar se há quantidade suficiente
+        if (item.quantidade < quantidade) {
+            return res.status(400).json({
+                success: false,
+                message: 'Quantidade insuficiente no estoque'
+            });
+        }
+
+        // Descontar do estoque
+        await db.descontarEstoque(id, quantidade);
+
+        // Registrar movimentação
+        await db.inserirMovimentacao({
+            itemId: item.id,
+            itemNome: item.nome,
+            tipo: 'saida',
+            quantidade: quantidade,
+            destino: destino,
+            descricao: observacao || 'Retirada direta do estoque'
+        });
+
+        res.json({
+            success: true,
+            message: 'Retirada realizada com sucesso',
+            novaQuantidade: item.quantidade - quantidade
+        });
+    } catch (error) {
+        console.error('Erro ao realizar retirada:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erro ao realizar retirada',
+            error: error.message
+        });
+    }
+});
+
+// Rota para deletar item
+app.delete('/api/itens/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Verificar se o item existe
+        const item = await db.buscarItemPorId(id);
+        if (!item) {
+            return res.status(404).json({
+                success: false,
+                message: 'Item não encontrado'
+            });
+        }
+
+        // Verificar se há requisições pendentes para este item
+        const requisicoesPendentes = await db.buscarRequisicoesPendentes();
+        const temRequisicaoPendente = requisicoesPendentes.some(req => req.itemId === parseInt(id));
+        
+        if (temRequisicaoPendente) {
+            return res.status(400).json({
+                success: false,
+                message: 'Não é possível remover o item pois existem requisições pendentes'
+            });
+        }
+
+        // Remover o item
+        await db.removerItem(id);
+        
+        res.json({
+            success: true,
+            message: 'Item removido com sucesso'
+        });
+    } catch (error) {
+        console.error('Erro ao remover item:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erro ao remover item'
         });
     }
 });
@@ -542,7 +840,6 @@ app.use((err, req, res, next) => {
 });
 
 // Rota para servir o HTML principal
-
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -575,320 +872,6 @@ process.on('SIGINT', () => {
     console.log('\nDesligando servidor...');
     db.fecharConexao();
     process.exit(0);
-});
-
-// Rota para retirada de item
-app.post('/api/itens/:id/retirar', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { quantidade, destino, observacao } = req.body;
-
-        if (!quantidade || !destino) {
-            return res.status(400).json({
-                success: false,
-                message: 'Quantidade e destino são obrigatórios'
-            });
-        }
-
-        // Verificar se o item existe
-        const item = await db.buscarItemPorId(id);
-        if (!item) {
-            return res.status(404).json({
-                success: false,
-                message: 'Item não encontrado'
-            });
-        }
-
-        // Verificar se há quantidade suficiente
-        if (item.quantidade < quantidade) {
-            return res.status(400).json({
-                success: false,
-                message: 'Quantidade insuficiente no estoque'
-            });
-        }
-
-        // Descontar do estoque
-        await db.descontarEstoque(id, quantidade);
-
-        // Registrar movimentação
-        await db.inserirMovimentacao({
-            itemId: item.id,
-            itemNome: item.nome,
-            tipo: 'saida',
-            quantidade: quantidade,
-            destino: destino,
-            descricao: observacao || 'Retirada direta do estoque'
-        });
-
-        res.json({
-            success: true,
-            message: 'Retirada realizada com sucesso',
-            novaQuantidade: item.quantidade - quantidade
-        });
-    } catch (error) {
-        console.error('Erro ao realizar retirada:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao realizar retirada',
-            error: error.message
-        });
-    }
-});
-// Adicione esta rota no seu server.js, junto com as outras rotas de itens
-
-// Rota para atualizar item completo
-app.put('/api/itens/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const itemData = req.body;
-        
-        // Verificar se o item existe
-        const itemExistente = await db.buscarItemPorId(id);
-        if (!itemExistente) {
-            return res.status(404).json({
-                success: false,
-                message: 'Item não encontrado'
-            });
-        }
-
-        // Atualizar item no banco de dados
-        const sql = `
-            UPDATE itens SET 
-                nome = ?, 
-                serie = ?, 
-                descricao = ?, 
-                origem = ?, 
-                destino = ?, 
-                valor = ?, 
-                nf = ?, 
-                quantidade = ?, 
-                minimo = ?, 
-                ideal = ?, 
-                infos = ?
-            WHERE id = ?
-        `;
-
-        await db.run(sql, [
-            itemData.nome || itemExistente.nome,
-            itemData.serie || itemExistente.serie,
-            itemData.descricao || itemExistente.descricao,
-            itemData.origem || itemExistente.origem,
-            itemData.destino || itemExistente.destino,
-            itemData.valor || itemExistente.valor,
-            itemData.nf || itemExistente.nf,
-            itemData.quantidade !== undefined ? itemData.quantidade : itemExistente.quantidade,
-            itemData.minimo !== undefined ? itemData.minimo : itemExistente.minimo,
-            itemData.ideal !== undefined ? itemData.ideal : itemExistente.ideal,
-            itemData.infos || itemExistente.infos,
-            id
-        ]);
-
-        // Se a quantidade foi alterada, registrar movimentação
-        if (itemData.quantidade !== undefined && itemData.quantidade !== itemExistente.quantidade) {
-            const diferenca = itemData.quantidade - itemExistente.quantidade;
-            const tipo = diferenca > 0 ? 'entrada' : 'saida';
-            const quantidade = Math.abs(diferenca);
-
-            await db.inserirMovimentacao({
-                itemId: parseInt(id),
-                itemNome: itemData.nome || itemExistente.nome,
-                tipo: tipo,
-                quantidade: quantidade,
-                origem: tipo === 'entrada' ? 'Atualização de item' : null,
-                destino: tipo === 'saida' ? 'Atualização de item' : null,
-                descricao: `Quantidade ${tipo === 'entrada' ? 'aumentada' : 'diminuída'} via edição do item`
-            });
-        }
-
-        // Buscar item atualizado
-        const itemAtualizado = await db.buscarItemPorId(id);
-
-        res.json({
-            success: true,
-            message: 'Item atualizado com sucesso',
-            item: itemAtualizado
-        });
-    } catch (error) {
-        console.error('Erro ao atualizar item:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao atualizar item',
-            error: error.message
-        });
-    }
-});
-
-// Rota alternativa para atualizar apenas campos específicos (PATCH)
-app.patch('/api/itens/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const updates = req.body;
-        
-        // Verificar se o item existe
-        const itemExistente = await db.buscarItemPorId(id);
-        if (!itemExistente) {
-            return res.status(404).json({
-                success: false,
-                message: 'Item não encontrado'
-            });
-        }
-
-        // Construir query dinamicamente baseada nos campos enviados
-        const camposPermitidos = ['nome', 'serie', 'descricao', 'origem', 'destino', 'valor', 'nf', 'quantidade', 'minimo', 'ideal', 'infos'];
-        const camposParaAtualizar = [];
-        const valores = [];
-
-        Object.keys(updates).forEach(campo => {
-            if (camposPermitidos.includes(campo)) {
-                camposParaAtualizar.push(`${campo} = ?`);
-                valores.push(updates[campo]);
-            }
-        });
-
-        if (camposParaAtualizar.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Nenhum campo válido para atualizar'
-            });
-        }
-
-        valores.push(id); // Adicionar ID para a cláusula WHERE
-
-        const sql = `UPDATE itens SET ${camposParaAtualizar.join(', ')} WHERE id = ?`;
-        await db.run(sql, valores);
-
-        // Se a quantidade foi alterada, registrar movimentação
-        if (updates.quantidade !== undefined && updates.quantidade !== itemExistente.quantidade) {
-            const diferenca = updates.quantidade - itemExistente.quantidade;
-            const tipo = diferenca > 0 ? 'entrada' : 'saida';
-            const quantidade = Math.abs(diferenca);
-
-            await db.inserirMovimentacao({
-                itemId: parseInt(id),
-                itemNome: updates.nome || itemExistente.nome,
-                tipo: tipo,
-                quantidade: quantidade,
-                origem: tipo === 'entrada' ? 'Atualização parcial' : null,
-                destino: tipo === 'saida' ? 'Atualização parcial' : null,
-                descricao: `Quantidade ${tipo === 'entrada' ? 'aumentada' : 'diminuída'} via edição parcial`
-            });
-        }
-
-        // Buscar item atualizado
-        const itemAtualizado = await db.buscarItemPorId(id);
-
-        res.json({
-            success: true,
-            message: 'Item atualizado com sucesso',
-            item: itemAtualizado,
-            camposAtualizados: Object.keys(updates)
-        });
-    } catch (error) {
-        console.error('Erro ao atualizar item:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao atualizar item',
-            error: error.message
-        });
-    }
-});
-
-// Adicione esta rota no seu server.js, junto com as outras rotas de itens
-
-// Rota para adicionar estoque ao item
-app.post('/api/itens/:id/adicionar', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { quantidade, origem, observacao } = req.body;
-
-        if (!quantidade || quantidade <= 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Quantidade deve ser um número positivo'
-            });
-        }
-
-        // Verificar se o item existe
-        const item = await db.buscarItemPorId(id);
-        if (!item) {
-            return res.status(404).json({
-                success: false,
-                message: 'Item não encontrado'
-            });
-        }
-
-        // Calcular nova quantidade
-        const novaQuantidade = item.quantidade + parseInt(quantidade);
-
-        // Atualizar estoque
-        await db.atualizarQuantidadeItem(id, novaQuantidade);
-
-        // Registrar movimentação
-        await db.inserirMovimentacao({
-            itemId: item.id,
-            itemNome: item.nome,
-            tipo: 'entrada',
-            quantidade: parseInt(quantidade),
-            origem: origem || 'Adição manual',
-            descricao: observacao || 'Adição manual ao estoque'
-        });
-
-        res.json({
-            success: true,
-            message: 'Estoque adicionado com sucesso',
-            quantidadeAnterior: item.quantidade,
-            quantidadeAdicionada: parseInt(quantidade),
-            novaQuantidade: novaQuantidade
-        });
-    } catch (error) {
-        console.error('Erro ao adicionar estoque:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao adicionar estoque',
-            error: error.message
-        });
-    }
-});
-
-// Rota para deletar item
-app.delete('/api/itens/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        
-        // Verificar se o item existe
-        const item = await db.buscarItemPorId(id);
-        if (!item) {
-            return res.status(404).json({
-                success: false,
-                message: 'Item não encontrado'
-            });
-        }
-
-        // Verificar se há requisições pendentes para este item
-        const requisicoesPendentes = await db.buscarRequisicoesPendentes();
-        const temRequisicaoPendente = requisicoesPendentes.some(req => req.itemId === parseInt(id));
-        
-        if (temRequisicaoPendente) {
-            return res.status(400).json({
-                success: false,
-                message: 'Não é possível remover o item pois existem requisições pendentes'
-            });
-        }
-
-        // Remover o item
-        await db.removerItem(id);
-        
-        res.json({
-            success: true,
-            message: 'Item removido com sucesso'
-        });
-    } catch (error) {
-        console.error('Erro ao remover item:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao remover item'
-        });
-    }
 });
 
 module.exports = app;
