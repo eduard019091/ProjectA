@@ -980,11 +980,11 @@ app.listen(PORT, () => {
     console.log(`Acesse: http://localhost:${PORT}`);
     
     // Verificar integridade do banco
-    db.verificarBanco().then(isOk => {
-        if (isOk) {
+    db.healthCheck().then(result => {
+        if (result.status === 'connected') {
             console.log('Banco de dados verificado e funcionando');
         } else {
-            console.error('Problemas detectados no banco de dados');
+            console.error('Problemas detectados no banco de dados:', result.error);
         }
     });
 });
