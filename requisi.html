@@ -34,6 +34,7 @@
     <div class="container">
         <div class="header-content">
             <img src="./andritzlogo.png" alt="Andritz Logo" class="logo">
+            <button class="btn btn-logout" onclick="logout()" style="position: absolute; top: 10px; right: 10px; background: #dc3545; color: white;">Sair</button>
         </div>
         <div class="header">
             <h1>Sistema de Requisições</h1>
@@ -41,22 +42,8 @@
                 <button class="nav-btn active" onclick="showSection('novaRequisicao')">Nova Requisição</button>
                 <button class="nav-btn" onclick="showSection('minhasRequisicoes')">Minhas Requisições</button>
                 <button class="nav-btn admin-only" onclick="showSection('aprovarRequisicoes')" style="display: none;">Aprovar Requisições</button>
-
-
-                <button class="nav-btn btn-voltar-estoque" id="btnVoltarEstoque" style="display: none;">Voltar ao Estoque</button>
+                <button class="nav-btn btn-voltar-estoque" id="btnVoltarEstoque" style="display: none;" onclick="window.location.href='index.html'">Voltar ao Estoque</button>
             </div>
-        </div>
-
-        <!-- Indicador de loading -->
-        <div id="loading" class="loading" style="display: none;">
-            <p>Carregando dados do usuário...</p>
-        </div>
-
-        <!-- Mensagem de acesso negado -->
-        <div id="accessDenied" class="access-denied" style="display: none;">
-            <h2>Acesso Negado</h2>
-            <p>Você não tem permissão para acessar esta página.</p>
-            <button class="btn" onclick="window.location.href='login.html'">Voltar ao Login</button>
         </div>
 
         <!-- Nova Requisição -->
@@ -102,7 +89,11 @@
                                 <th>Ação</th>
                             </tr>
                         </thead>
-                        <tbody></tbody>
+                        <tbody>
+                            <tr>
+                                <td colspan="3" style="text-align:center;color:#666;">Nenhum item adicionado ao pacote</td>
+                            </tr>
+                        </tbody>
                     </table>
                 </div>
                 <div class="form-group">
@@ -114,17 +105,17 @@
 
         <!-- Minhas Requisições -->
         <div id="minhasRequisicoes" class="content section">
-            <h2>Minhas Requisições</h2>
+            <h2>Meus Pacotes de Requisição</h2>
             <div class="table-container">
                 <table id="tabelaMinhasRequisicoes">
                     <thead>
                         <tr>
                             <th>Data</th>
-                            <th>Item</th>
-                            <th>Quantidade</th>
                             <th>Centro de Custo</th>
+                            <th>Projeto</th>
                             <th>Status</th>
-                            <th>Observações</th>
+                            <th>Qtd Itens</th>
+                            <th>Ações</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -134,18 +125,17 @@
 
         <!-- Aprovar Requisições (Admin) -->
         <div id="aprovarRequisicoes" class="content section">
-            <h2>Aprovar Requisições</h2>
+            <h2>Aprovar Pacotes de Requisição</h2>
             <div class="table-container">
                 <table id="tabelaAprovarRequisicoes">
                     <thead>
                         <tr>
                             <th>Data</th>
                             <th>Solicitante</th>
-                            <th>Item</th>
-                            <th>Quantidade</th>
                             <th>Centro de Custo</th>
                             <th>Projeto</th>
-                            <th>Justificativa</th>
+                            <th>Status</th>
+                            <th>Qtd Itens</th>
                             <th>Ações</th>
                         </tr>
                     </thead>
@@ -153,7 +143,55 @@
                 </table>
             </div>
         </div>
+
+        <!-- Modal para detalhes do pacote -->
+        <div id="modalDetalhesPacote" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="close" onclick="fecharModal()">&times;</span>
+                <h3>Detalhes do Pacote</h3>
+                <div id="conteudoDetalhesPacote"></div>
+            </div>
+        </div>
     </div>
+
+    <script>
+        // Função para alternar seções e ativar botões de navegação
+        function showSection(sectionId) {
+            // Oculta todas as seções
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.remove('active');
+            });
+            // Remove active de todos os botões
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            // Mostra a seção desejada
+            const section = document.getElementById(sectionId);
+            if (section) section.classList.add('active');
+            // Ativa o botão correspondente
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(sectionId)) {
+                    btn.classList.add('active');
+                }
+            });
+        }
+
+        // Função para logout
+        function logout() {
+            sessionStorage.removeItem('currentUser');
+            localStorage.removeItem('userData');
+            window.location.href = 'login.html';
+        }
+
+        // Função para fechar modal
+        function fecharModal() {
+            document.getElementById('modalDetalhesPacote').style.display = 'none';
+        }
+    </script>
+
+    <script src="requisi.js"></script>
+</body>
+</html>
 
     <script>
         // --- Lógica para Pacote de Itens ---
@@ -391,19 +429,26 @@
                 const tbody = document.querySelector('#tabelaMinhasRequisicoes tbody');
                 if (!tbody) return;
                 tbody.innerHTML = '';
+                if (!pacotes || pacotes.length === 0) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = '<td colspan="6" style="text-align:center;color:#666;">Nenhum pacote encontrado</td>';
+                    tbody.appendChild(tr);
+                    return;
+                }
                 pacotes.forEach(req => {
-                    (req.itens || []).forEach((item) => {
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td>${new Date(req.data).toLocaleString()}</td>
-                            <td>${item.itemNome}</td>
-                            <td>${item.quantidade}</td>
-                            <td>${req.centroCusto}</td>
-                            <td>${item.status}</td>
-                            <td>${item.status !== 'PENDENTE' ? (item.status === 'NEGADO' ? 'Negado pelo admin' : 'Aprovado') : ''}</td>
-                        `;
-                        tbody.appendChild(tr);
-                    });
+                    const statusPacote = req.status || 'PENDENTE';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${new Date(req.data).toLocaleString()}</td>
+                        <td>${req.centroCusto}</td>
+                        <td>${req.projeto}</td>
+                        <td><span class="status-${statusPacote.toLowerCase()}">${statusPacote}</span></td>
+                        <td>${req.itens ? req.itens.length : 0}</td>
+                        <td>
+                            <button class="btn btn-sm" onclick="verDetalhesPacote(${req.id})">Ver Detalhes</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
                 });
             });
     }
@@ -416,34 +461,77 @@
                 const tbody = document.querySelector('#tabelaAprovarRequisicoes tbody');
                 if (!tbody) return;
                 tbody.innerHTML = '';
-                pacotes.forEach((req) => {
-                    (req.itens || []).forEach((item) => {
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td>${new Date(req.data).toLocaleString()}</td>
-                            <td>${req.userId}</td>
-                            <td>${item.itemNome}</td>
-                            <td>${item.quantidade}</td>
-                            <td>${req.centroCusto}</td>
-                            <td>${req.projeto}</td>
-                            <td>${req.justificativa}</td>
-                            <td>
-                                <button class="btn" onclick="aprovarItem(${item.id})" ${item.status !== 'PENDENTE' ? 'disabled' : ''}>Aprovar</button>
-                                <button class="btn" onclick="negarItem(${item.id})" ${item.status !== 'PENDENTE' ? 'disabled' : ''}>Negar</button>
-                            </td>
-                        `;
-                        tbody.appendChild(tr);
-                    });
-                    // Ações para o pacote inteiro
-                    const trPacote = document.createElement('tr');
-                    trPacote.innerHTML = `
-                        <td colspan="8" style="text-align:right; background:#f9f9f9;">
-                            <button class="btn" onclick="aprovarPacote(${req.id})">Aprovar Pacote</button>
-                            <button class="btn" onclick="negarPacote(${req.id})">Negar Pacote</button>
+                if (!pacotes || pacotes.length === 0) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = '<td colspan="7" style="text-align:center;color:#666;">Nenhum pacote pendente</td>';
+                    tbody.appendChild(tr);
+                    return;
+                }
+                pacotes.forEach(req => {
+                    const statusPacote = req.status || 'PENDENTE';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${new Date(req.data).toLocaleString()}</td>
+                        <td>${req.userId}</td>
+                        <td>${req.centroCusto}</td>
+                        <td>${req.projeto}</td>
+                        <td><span class="status-${statusPacote.toLowerCase()}">${statusPacote}</span></td>
+                        <td>${req.itens ? req.itens.length : 0}</td>
+                        <td>
+                            <button class="btn btn-sm" onclick="verDetalhesPacoteAdmin(${req.id})">Gerenciar</button>
                         </td>
                     `;
-                    tbody.appendChild(trPacote);
+                    tbody.appendChild(tr);
                 });
+            });
+    }
+    // Função para ver detalhes do pacote (usuário)
+    function verDetalhesPacote(pacoteId) {
+        fetch(`/api/pacotes/usuario/${JSON.parse(localStorage.getItem('userData')||'{}').id}`)
+            .then(res => res.json())
+            .then(pacotes => {
+                const pacote = pacotes.find(p => p.id === pacoteId);
+                if (!pacote) return alert('Pacote não encontrado');
+                let html = `<strong>Centro de Custo:</strong> ${pacote.centroCusto}<br>`;
+                html += `<strong>Projeto:</strong> ${pacote.projeto}<br>`;
+                html += `<strong>Status do Pacote:</strong> <span class="status-${(pacote.status||'pendente').toLowerCase()}">${pacote.status||'PENDENTE'}</span><br>`;
+                html += `<strong>Itens:</strong><br><ul>`;
+                (pacote.itens||[]).forEach(item => {
+                    html += `<li>${item.itemNome} - ${item.quantidade} <span class="status-${(item.status||'pendente').toLowerCase()}">${item.status||'PENDENTE'}</span></li>`;
+                });
+                html += '</ul>';
+                document.getElementById('conteudoDetalhesPacote').innerHTML = html;
+                document.getElementById('modalDetalhesPacote').style.display = 'block';
+            });
+    }
+
+    // Função para ver detalhes e aprovar/negar pacote (admin)
+    function verDetalhesPacoteAdmin(pacoteId) {
+        fetch('/api/pacotes/pendentes')
+            .then(res => res.json())
+            .then(pacotes => {
+                const pacote = pacotes.find(p => p.id === pacoteId);
+                if (!pacote) return alert('Pacote não encontrado');
+                let html = `<strong>Solicitante:</strong> ${pacote.userId}<br>`;
+                html += `<strong>Centro de Custo:</strong> ${pacote.centroCusto}<br>`;
+                html += `<strong>Projeto:</strong> ${pacote.projeto}<br>`;
+                html += `<strong>Status do Pacote:</strong> <span class="status-${(pacote.status||'pendente').toLowerCase()}">${pacote.status||'PENDENTE'}</span><br>`;
+                html += `<strong>Itens:</strong><br><ul>`;
+                (pacote.itens||[]).forEach(item => {
+                    html += `<li>${item.itemNome} - ${item.quantidade} <span class="status-${(item.status||'pendente').toLowerCase()}">${item.status||'PENDENTE'}</span> `;
+                    if(item.status==='PENDENTE') {
+                        html += `<button class='btn btn-sm' onclick='aprovarItem(${item.id})'>Aprovar</button> <button class='btn btn-sm' onclick='negarItem(${item.id})'>Negar</button>`;
+                    }
+                    html += '</li>';
+                });
+                html += '</ul>';
+                // Botões para aprovar/negar pacote inteiro
+                html += `<div style='margin-top:10px;text-align:right;'>`;
+                html += `<button class='btn btn-primary' onclick='aprovarPacote(${pacote.id})'>Aprovar Pacote</button> `;
+                html += `<button class='btn btn-danger' onclick='negarPacote(${pacote.id})'>Negar Pacote</button>`;
+                html += `</div>`;
+                document.getElementById('conteudoDetalhesPacote').innerHTML = html;
+                document.getElementById('modalDetalhesPacote').style.display = 'block';
             });
     }
 
