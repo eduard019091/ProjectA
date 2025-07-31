@@ -66,7 +66,27 @@ function adicionarItemPacote() {
     // Limpar apenas a seleção do item e quantidade
     itemSelect.value = '';
     quantidadeInput.value = '';
-}
+// ...existing code...
+
+let userData = {};
+    try {
+        userData = JSON.parse(sessionStorage.getItem('currentUser')) || 
+                  JSON.parse(localStorage.getItem('userData')) || {};
+    } catch (e) {
+        console.error('Erro ao recuperar dados do usuário:', e);
+    }
+    
+    if (!userData.id) {
+        console.log('Usuário não identificado, redirecionando para login');
+        window.location.href = 'login.html';
+        return;
+    }
+    
+    console.log('Usuário identificado:', userData);
+    
+    // Configurar interface baseada no tipo de usuário
+    configureUserInterface();
+    
 
 function mostrarMensagemPacote() {
     // Criar ou atualizar mensagem informativa
@@ -90,12 +110,15 @@ function mostrarMensagemPacote() {
         }
     }
     
-    mensagemDiv.innerHTML = `
-        <strong>📦 Modo Pacote Ativo</strong><br>
-        Centro de Custo: <strong>${window.pacoteInfo.centroCusto}</strong><br>
-        Projeto: <strong>${window.pacoteInfo.projeto}</strong><br>
-        <small>Todos os itens adicionados terão essas informações. <button type="button" onclick="limparPacote()" style="background:none;border:none;color:#0066cc;text-decoration:underline;cursor:pointer;">Limpar pacote</button></small>
-    `;
+    if (window.pacoteInfo) {
+        mensagemDiv.innerHTML = `
+            <strong>📦 Modo Pacote Ativo</strong><br>
+            Centro de Custo: <strong>${window.pacoteInfo.centroCusto}</strong><br>
+            Projeto: <strong>${window.pacoteInfo.projeto}</strong><br>
+            <small>Todos os itens adicionados terão essas informações. <button type="button" onclick="limparPacote()" style="background:none;border:none;color:#0066cc;text-decoration:underline;cursor:pointer;">Limpar pacote</button></small>
+        `;
+    }
+}
 }
 
 function atualizarContadorPacote() {
@@ -195,6 +218,8 @@ function limparPacote() {
     atualizarContadorPacote();
 }
 
+
+// 5. Atualizar função de envio para usar dados corretos
 function enviarPacoteRequisicao() {
     if (window.pacoteItens.length === 0) {
         alert('Adicione pelo menos um item ao pacote antes de enviar.');
@@ -207,24 +232,35 @@ function enviarPacoteRequisicao() {
     }
 
     const justificativa = document.getElementById('justificativa').value.trim();
-    const userData = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-
+    
+    // Tentar pegar userData de ambos os locais
+    let userData = {};
+    try {
+        userData = JSON.parse(sessionStorage.getItem('currentUser')) || 
+                  JSON.parse(localStorage.getItem('userData')) || {};
+    } catch (e) {
+        console.error('Erro ao recuperar dados do usuário:', e);
+    }
+    
     if (!userData.id) {
         alert('Usuário não identificado. Faça login novamente.');
+        window.location.href = 'login.html';
         return;
     }
 
     // Preparar dados do pacote
     const pacoteData = {
-        userId: userData.id,
+        userId: parseInt(userData.id),  // Garantir que é número
         centroCusto: window.pacoteInfo.centroCusto,
         projeto: window.pacoteInfo.projeto,
         justificativa: justificativa || '',
         itens: window.pacoteItens.map(item => ({
             itemId: parseInt(item.itemId),
-            quantidade: item.quantidade
+            quantidade: parseInt(item.quantidade)
         }))
     };
+    
+    console.log('Enviando pacote:', pacoteData);
 
     // Enviar pacote
     fetch('/api/pacotes', {
@@ -232,8 +268,12 @@ function enviarPacoteRequisicao() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pacoteData)
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('Resposta do servidor:', response.status);
+        return response.json();
+    })
     .then(data => {
+        console.log('Dados recebidos:', data);
         if (data.success) {
             alert('Pacote de requisição enviado com sucesso!');
             
@@ -242,9 +282,9 @@ function enviarPacoteRequisicao() {
             limparPacote();
             
             // Recarregar listas
-            carregarMeusPacotes();
+            carregarMinhasRequisicoes();
             if (isUserAdmin()) {
-                carregarPacotesPendentes();
+                carregarRequisicoesParaAprovar();
             }
         } else {
             alert(data.message || 'Erro ao enviar pacote');
@@ -279,7 +319,68 @@ function configureUserInterface() {
             });
         }
     }
+    function carregarRequisicoesParaAprovar() {
+    if (!isUserAdmin()) {
+        console.log('Usuário não é admin, não carregando requisições para aprovar');
+        return;
+    }
     
+    console.log('Carregando pacotes pendentes para aprovação...');
+    
+    fetch('/api/pacotes/pendentes')
+        .then(res => {
+            console.log('Resposta de pacotes pendentes:', res.status);
+            return res.json();
+        })
+        .then(pacotes => {
+            console.log('Pacotes pendentes recebidos:', pacotes);
+            
+            const tbody = document.querySelector('#tabelaAprovarRequisicoes tbody');
+            if (!tbody) {
+                console.error('Tabela de aprovar requisições não encontrada');
+                return;
+            }
+            
+            tbody.innerHTML = '';
+            
+            if (!pacotes || pacotes.length === 0) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td colspan="7" style="text-align:center;color:#666;">Nenhum pacote pendente</td>';
+                tbody.appendChild(tr);
+                return;
+            }
+            
+            pacotes.forEach(pacote => {
+                const statusPacote = pacote.status || 'PENDENTE';
+                const dataFormatada = new Date(pacote.data).toLocaleString('pt-BR');
+                const qtdItens = pacote.itens ? pacote.itens.length : 0;
+                const solicitante = pacote.userName || `ID: ${pacote.userId}`;
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${dataFormatada}</td>
+                    <td>${solicitante}</td>
+                    <td>${pacote.centroCusto}</td>
+                    <td>${pacote.projeto}</td>
+                    <td><span class="status-${statusPacote.toLowerCase()}">${statusPacote}</span></td>
+                    <td>${qtdItens}</td>
+                    <td>
+                        <button class="btn btn-sm" onclick="verDetalhesPacoteAdmin(${pacote.id})">Gerenciar</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        })
+        .catch(error => {
+            console.error('Erro ao carregar pacotes pendentes:', error);
+            const tbody = document.querySelector('#tabelaAprovarRequisicoes tbody');
+            if (tbody) {
+                tbody.innerHTML = '<td colspan="7" style="text-align:center;color:#f00;">Erro ao carregar pacotes pendentes</td>';
+            }
+        });
+}
+
+
     // Mostrar/ocultar seção de aprovar requisições baseado no tipo de usuário
     const adminButtons = document.querySelectorAll('.admin-only');
     adminButtons.forEach(button => {
@@ -309,7 +410,9 @@ function verificarAcessoEstoque() {
 }
 
 // Função para inicializar o sistema de requisições
-function inicializarSistemaRequisicoes() {
+function inicializarSistema() {
+    console.log('Inicializando sistema de requisições...');
+
     // Verificar se o usuário está logado
     const userData = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (!userData.id) {
@@ -317,21 +420,16 @@ function inicializarSistemaRequisicoes() {
         window.location.href = 'login.html';
         return;
     }
-    
     // Carregar dados específicos do usuário
     carregarDadosUsuario();
-    
     // Carregar itens para o select
     carregarItensSelect();
-    
     // Carregar pacotes do usuário
-    carregarMeusPacotes();
-    
+    carregarMinhasRequisicoes();
     // Se for admin, carregar pacotes pendentes
     if (isUserAdmin()) {
         carregarPacotesPendentes();
     }
-    
     // Configurar interface baseada no tipo de usuário (mover para o final)
     setTimeout(() => {
         configureUserInterface();
@@ -423,43 +521,55 @@ function adicionarBotaoLogout() {
     `;
     
     document.body.appendChild(logoutButton);
-}
 
-// Função para carregar meus pacotes
-function carregarMeusPacotes() {
-    const userData = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+// Função única e robusta para carregar as requisições do usuário
+function carregarMinhasRequisicoes() {
+    const userData = JSON.parse(sessionStorage.getItem('currentUser') || localStorage.getItem('userData') || '{}');
+    if (!userData.id) {
+        alert('Usuário não identificado. Faça login novamente.');
+        window.location.href = 'login.html';
+        return;
+    }
     fetch(`/api/pacotes/usuario/${userData.id}`)
-        .then(response => response.json())
-        .then(data => {
-            const tabela = document.getElementById('tabelaMeusPacotes');
-            if (!tabela) return;
-            
-            const tbody = tabela.getElementsByTagName('tbody')[0];
+        .then(res => res.json())
+        .then(pacotes => {
+            const tbody = document.querySelector('#tabelaMinhasRequisicoes tbody');
+            if (!tbody) return;
             tbody.innerHTML = '';
-            
-            data.forEach(pacote => {
+            if (!pacotes || pacotes.length === 0) {
                 const tr = document.createElement('tr');
-                const statusClass = `status-${pacote.status.toLowerCase()}`;
-                
+                tr.innerHTML = '<td colspan="6" style="text-align:center;color:#666;">Nenhum pacote encontrado</td>';
+                tbody.appendChild(tr);
+                return;
+            }
+            pacotes.forEach(pacote => {
+                const statusPacote = pacote.status || 'PENDENTE';
+                const dataFormatada = new Date(pacote.data).toLocaleString('pt-BR');
+                const qtdItens = pacote.itens ? pacote.itens.length : 0;
+                const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td>${new Date(pacote.data).toLocaleDateString()}</td>
+                    <td>${dataFormatada}</td>
                     <td>${pacote.centroCusto}</td>
                     <td>${pacote.projeto}</td>
-                    <td>${pacote.itens ? pacote.itens.length : 0} itens</td>
-                    <td><span class="${statusClass}">${pacote.status}</span></td>
+                    <td><span class="status-${statusPacote.toLowerCase()}">${statusPacote}</span></td>
+                    <td>${qtdItens}</td>
                     <td>
-                        <button class="btn btn-sm" onclick="verDetalhesPacote(${pacote.id})">
-                            Ver Detalhes
-                        </button>
+                        <button class="btn btn-sm" onclick="verDetalhesPacote(${pacote.id})">Ver Detalhes</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
             });
         })
         .catch(error => {
-            console.error('Erro ao carregar meus pacotes:', error);
+            const tbody = document.querySelector('#tabelaMinhasRequisicoes tbody');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#c00;">Erro ao carregar pacotes</td></tr>';
+            }
         });
 }
+
+
+// Função para carregar meus pacotes foi removida. Use apenas carregarMinhasRequisicoes().
 
 // Função para carregar pacotes pendentes (admin)
 function carregarPacotesPendentes() {
@@ -495,62 +605,55 @@ function carregarPacotesPendentes() {
         });
 }
 
+// 4. Corrigir função verDetalhesPacote
 function verDetalhesPacote(pacoteId) {
-    // Implementar modal ou nova página para ver detalhes
-    alert('Funcionalidade de detalhes em desenvolvimento');
-}
-
-function gerenciarPacote(pacoteId) {
-    // Implementar interface de gerenciamento para admin
-    alert('Funcionalidade de gerenciamento em desenvolvimento');
-}
-
-// Manter funções antigas para compatibilidade (se necessário)
-function carregarRequisicoesUsuario() {
-    // Função antiga - pode ser removida se não estiver sendo usada
-}
-
-function carregarRequisicoesPendentes() {
-    // Função antiga - pode ser removida se não estiver sendo usada
-}
-
-function enviarNovaRequisicao(event) {
-    event.preventDefault();
-    const userData = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    const itemId = document.getElementById('itemRequisicao').value;
-    const quantidade = document.getElementById('quantidadeRequisicao').value;
-    const centroCusto = document.getElementById('centroCusto').value;
-    const projeto = document.getElementById('projeto').value;
-    const justificativa = document.getElementById('justificativa').value;
+    const userData = JSON.parse(sessionStorage.getItem('currentUser') || localStorage.getItem('userData') || '{}');
     
-    if (!itemId || !quantidade || !centroCusto || !projeto) {
-        alert('Preencha todos os campos!');
-        return;
-    }
-    
-    fetch('/api/requisicoes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            userId: userData.id,
-            itemId,
-            quantidade,
-            centroCusto,
-            projeto,
-            justificativa
+    fetch(`/api/pacotes/usuario/${userData.id}`)
+        .then(res => res.json())
+        .then(pacotes => {
+            const pacote = pacotes.find(p => p.id === pacoteId);
+            if (!pacote) {
+                alert('Pacote não encontrado');
+                return;
+            }
+            
+            let html = `
+                <div class="pacote-detalhes">
+                    <h4>Detalhes do Pacote #${pacote.id}</h4>
+                    <p><strong>Centro de Custo:</strong> ${pacote.centroCusto}</p>
+                    <p><strong>Projeto:</strong> ${pacote.projeto}</p>
+                    <p><strong>Justificativa:</strong> ${pacote.justificativa || 'Não informada'}</p>
+                    <p><strong>Status do Pacote:</strong> <span class="status-${(pacote.status||'pendente').toLowerCase()}">${pacote.status||'PENDENTE'}</span></p>
+                    <h5>Itens:</h5>
+                    <ul class="lista-itens-pacote">
+            `;
+            
+            if (pacote.itens && pacote.itens.length > 0) {
+                pacote.itens.forEach(item => {
+                    const statusItem = item.status || 'PENDENTE';
+                    html += `
+                        <li>
+                            <strong>${item.itemNome}</strong> - 
+                            Quantidade: ${item.quantidade} - 
+                            Status: <span class="status-${statusItem.toLowerCase()}">${statusItem}</span>
+                            ${item.observacoes ? `<br><small>Obs: ${item.observacoes}</small>` : ''}
+                        </li>
+                    `;
+                });
+            } else {
+                html += '<li>Nenhum item encontrado</li>';
+            }
+            
+            html += '</ul></div>';
+            
+            document.getElementById('conteudoDetalhesPacote').innerHTML = html;
+            document.getElementById('modalDetalhesPacote').style.display = 'block';
         })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('Requisição enviada com sucesso!');
-            document.getElementById('requisicaoForm').reset();
-            carregarMeusPacotes();
-        } else {
-            alert(data.message || 'Erro ao enviar requisição');
-        }
-    })
-    .catch(error => {
-        alert('Erro ao enviar requisição');
-    });
+        .catch(error => {
+            console.error('Erro ao carregar detalhes do pacote:', error);
+            alert('Erro ao carregar detalhes do pacote');
+        });
 }
+}
+

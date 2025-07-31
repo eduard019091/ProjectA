@@ -483,66 +483,144 @@ function criarTabelaRequisicoes() {
         }
     }
     // --- PACOTES DE REQUISIÇÃO ---
-    function criarPacoteRequisicao(pacote, itens) {
-        return new Promise((resolve, reject) => {
-            db.run(
-                `INSERT INTO pacotes_requisicao (userId, centroCusto, projeto, justificativa, status) VALUES (?, ?, ?, ?, 'PENDENTE')`,
-                [pacote.userId, pacote.centroCusto, pacote.projeto, pacote.justificativa],
-                function (err) {
-                    if (err) return reject(err);
-                    const pacoteId = this.lastID;
-                    // Inserir itens do pacote
-                    const stmt = db.prepare(`INSERT INTO itens_pacote (pacoteId, itemId, quantidade, status) VALUES (?, ?, ?, 'PENDENTE')`);
-                    for (const item of itens) {
-                        stmt.run([pacoteId, item.itemId, item.quantidade]);
-                    }
-                    stmt.finalize((err) => {
-                        if (err) return reject(err);
-                        resolve(pacoteId);
-                    });
+    // 1. Corrigir a função criarPacoteRequisicao (problema com Promise)
+function criarPacoteRequisicao(pacote, itens) {
+    return new Promise((resolve, reject) => {
+        db.run(
+            `INSERT INTO pacotes_requisicao (userId, centroCusto, projeto, justificativa, status) VALUES (?, ?, ?, ?, 'PENDENTE')`,
+            [pacote.userId, pacote.centroCusto, pacote.projeto, pacote.justificativa],
+            function (err) {
+                if (err) {
+                    console.error('Erro ao criar pacote:', err);
+                    return reject(err);
                 }
-            );
-        });
-    }
+                const pacoteId = this.lastID;
+                
+                // Inserir itens do pacote usando Promise.all para melhor controle
+                const promises = itens.map(item => {
+                    return new Promise((resolveItem, rejectItem) => {
+                        db.run(
+                            `INSERT INTO itens_pacote (pacoteId, itemId, quantidade, status) VALUES (?, ?, ?, 'PENDENTE')`,
+                            [pacoteId, item.itemId, item.quantidade],
+                            function(err) {
+                                if (err) rejectItem(err);
+                                else resolveItem(this.lastID);
+                            }
+                        );
+                    });
+                });
+                
+                Promise.all(promises)
+                    .then(() => resolve(pacoteId))
+                    .catch(reject);
+            }
+        );
+    });
+}
 
     function buscarPacotesUsuario(userId) {
-        return new Promise((resolve, reject) => {
-            db.all(
-                `SELECT * FROM pacotes_requisicao WHERE userId = ? ORDER BY data DESC`,
-                [userId],
-                (err, rows) => {
-                    if (err) reject(err);
-                    else resolve(rows);
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT pr.*, u.name as userName 
+             FROM pacotes_requisicao pr 
+             JOIN usuarios u ON pr.userId = u.id 
+             WHERE pr.userId = ? 
+             ORDER BY pr.data DESC`,
+            [userId],
+            (err, rows) => {
+                if (err) {
+                    console.error('Erro ao buscar pacotes do usuário:', err);
+                    reject(err);
+                } else {
+                    resolve(rows);
                 }
-            );
-        });
-    }
+            }
+        );
+    });
+}
+
+
 
     function buscarItensPacote(pacoteId) {
-        return new Promise((resolve, reject) => {
-            db.all(
-                `SELECT ip.*, i.nome as itemNome FROM itens_pacote ip JOIN itens i ON ip.itemId = i.id WHERE ip.pacoteId = ?`,
-                [pacoteId],
-                (err, rows) => {
-                    if (err) reject(err);
-                    else resolve(rows);
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT ip.*, i.nome as itemNome, i.quantidade as estoqueAtual 
+             FROM itens_pacote ip 
+             JOIN itens i ON ip.itemId = i.id 
+             WHERE ip.pacoteId = ?`,
+            [pacoteId],
+            (err, rows) => {
+                if (err) {
+                    console.error('Erro ao buscar itens do pacote:', err);
+                    reject(err);
+                } else {
+                    resolve(rows);
                 }
-            );
-        });
-    }
+            }
+        );
+    });
+}
 
-    function buscarPacotesPendentes() {
-        return new Promise((resolve, reject) => {
-            db.all(
-                `SELECT * FROM pacotes_requisicao WHERE status = 'PENDENTE' OR status = 'PARCIAL' ORDER BY data ASC`,
-                [],
-                (err, rows) => {
-                    if (err) reject(err);
-                    else resolve(rows);
+// 5. Função para debug - verificar estrutura das tabelas
+function verificarEstruturaBanco() {
+    return new Promise((resolve, reject) => {
+        const queries = [
+            "SELECT name FROM sqlite_master WHERE type='table'",
+            "PRAGMA table_info(pacotes_requisicao)",
+            "PRAGMA table_info(itens_pacote)",
+            "SELECT COUNT(*) as total FROM pacotes_requisicao",
+            "SELECT COUNT(*) as total FROM itens_pacote"
+        ];
+        
+        const results = {};
+        
+        Promise.all(queries.map((query, index) => {
+            return new Promise((res, rej) => {
+                if (index === 0) {
+                    db.all(query, [], (err, rows) => {
+                        if (err) rej(err);
+                        else res({ query, rows });
+                    });
+                } else {
+                    db.all(query, [], (err, rows) => {
+                        if (err) rej(err);
+                        else res({ query, rows });
+                    });
                 }
-            );
-        });
-    }
+            });
+        }))
+        .then(allResults => {
+            allResults.forEach(result => {
+                console.log(`Resultado para: ${result.query}`, result.rows);
+            });
+            resolve(allResults);
+        })
+        .catch(reject);
+    });
+}
+   
+// 3. Corrigir buscarPacotesPendentes para incluir informações do usuário
+function buscarPacotesPendentes() {
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT pr.*, u.name as userName 
+             FROM pacotes_requisicao pr 
+             JOIN usuarios u ON pr.userId = u.id 
+             WHERE pr.status IN ('PENDENTE', 'PARCIAL') 
+             ORDER BY pr.data ASC`,
+            [],
+            (err, rows) => {
+                if (err) {
+                    console.error('Erro ao buscar pacotes pendentes:', err);
+                    reject(err);
+                } else {
+                    resolve(rows);
+                }
+            }
+        );
+    });
+}
+
 
     function atualizarStatusItemPacote(itemPacoteId, status, observacoes = null) {
         return new Promise((resolve, reject) => {
@@ -855,35 +933,33 @@ function atualizarQuantidadeItem(id, novaQuantidade) {
 }
 
 // 3. Adicionar essas funções no module.exports:
-module.exports = {
-    // Funções existentes...
+momodule.exports = {
+    // Funções de usuários
     buscarUsuarioPorEmail,
     cadastrarUsuario,
     autenticarUsuario,
+    
+    // Funções de itens
     inserirItem,
     buscarItens,
     buscarItemPorId,
+    buscarItemPorNomeEWBS,
     atualizarQuantidade,
+    atualizarQuantidadeItem,
     removerItem,
+    
+    // Funções de movimentações
     inserirMovimentacao,
     buscarMovimentacoes,
-    fecharConexao,
-    verificarBanco,
-    run,
-    exportarDados,
-    importarDados,
+    
+    // Funções de requisições individuais (compatibilidade)
     criarRequisicao,
     buscarRequisicoesUsuario,
     buscarRequisicoesPendentes,
     atualizarStatusRequisicao,
-    descontarEstoque,
     buscarRequisicaoPorId,
-    unificarItensDuplicados,
     
-    // NOVAS FUNÇÕES NECESSÁRIAS:
-    buscarItemPorNomeEWBS,
-    atualizarQuantidadeItem,
-    // Pacotes de requisição
+    // Funções de pacotes de requisição (CORRIGIDAS)
     criarPacoteRequisicao,
     buscarPacotesUsuario,
     buscarItensPacote,
@@ -891,5 +967,15 @@ module.exports = {
     atualizarStatusItemPacote,
     atualizarStatusPacote,
     buscarItemPacotePorId,
-    buscarPacotePorId
+    buscarPacotePorId,
+    
+    // Funções utilitárias
+    descontarEstoque,
+    fecharConexao,
+    verificarBanco,
+    verificarEstruturaBanco, // NOVA
+    run,
+    exportarDados,
+    importarDados,
+    unificarItensDuplicados
 };

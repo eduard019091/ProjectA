@@ -14,51 +14,173 @@ app.use(express.urlencoded({ extended: true }));
 // Servir arquivos estáticos
 app.use(express.static(__dirname));
 
-// --- PACOTES DE REQUISIÇÃO ---
-// Criar novo pacote de requisição
+// --- PACOTES DE REQUISIÇÃO - ROTAS CORRIGIDAS ---
+
+// Criar novo pacote de requisição (CORRIGIDA)
 app.post('/api/pacotes', async (req, res) => {
     try {
         const { userId, centroCusto, projeto, justificativa, itens } = req.body;
+        
+        console.log('Dados recebidos para criar pacote:', { userId, centroCusto, projeto, justificativa, itens });
+        
         if (!userId || !centroCusto || !projeto || !Array.isArray(itens) || itens.length === 0) {
-            return res.status(400).json({ success: false, message: 'Dados do pacote incompletos.' });
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Dados do pacote incompletos.' 
+            });
         }
-        const pacoteId = await db.criarPacoteRequisicao({ userId, centroCusto, projeto, justificativa }, itens);
+
+        // Validar se todos os itens têm itemId e quantidade
+        for (const item of itens) {
+            if (!item.itemId || !item.quantidade || item.quantidade <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Todos os itens devem ter ID e quantidade válidos.'
+                });
+            }
+        }
+
+        const pacoteId = await db.criarPacoteRequisicao(
+            { userId, centroCusto, projeto, justificativa }, 
+            itens
+        );
+        
+        console.log('Pacote criado com ID:', pacoteId);
+        
         res.json({ success: true, pacoteId });
     } catch (error) {
         console.error('Erro ao criar pacote:', error);
-        res.status(500).json({ success: false, message: 'Erro ao criar pacote.' });
+        res.status(500).json({ 
+            success: false, 
+            message: 'Erro ao criar pacote: ' + error.message 
+        });
     }
 });
 
-// Listar pacotes do usuário
+// Listar pacotes do usuário (CORRIGIDA)
 app.get('/api/pacotes/usuario/:userId', async (req, res) => {
     try {
-        const pacotes = await db.buscarPacotesUsuario(req.params.userId);
+        const userId = req.params.userId;
+        console.log('Buscando pacotes para usuário:', userId);
+        
+        const pacotes = await db.buscarPacotesUsuario(userId);
+        console.log('Pacotes encontrados:', pacotes.length);
+        
         // Buscar itens de cada pacote
-        for (const pacote of pacotes) {
-            pacote.itens = await db.buscarItensPacote(pacote.id);
-        }
-        res.json(pacotes);
+        const pacotesComItens = await Promise.all(
+            pacotes.map(async pacote => {
+                try {
+                    pacote.itens = await db.buscarItensPacote(pacote.id);
+                    console.log(`Pacote ${pacote.id} tem ${pacote.itens.length} itens`);
+                    return pacote;
+                } catch (error) {
+                    console.error(`Erro ao buscar itens do pacote ${pacote.id}:`, error);
+                    pacote.itens = [];
+                    return pacote;
+                }
+            })
+        );
+        
+        res.json(pacotesComItens);
     } catch (error) {
         console.error('Erro ao buscar pacotes do usuário:', error);
-        res.status(500).json({ success: false, message: 'Erro ao buscar pacotes.' });
+        res.status(500).json({ 
+            success: false, 
+            message: 'Erro ao buscar pacotes: ' + error.message 
+        });
     }
 });
 
-// Listar pacotes pendentes para admin
+// Listar pacotes pendentes para admin (CORRIGIDA)
 app.get('/api/pacotes/pendentes', async (req, res) => {
     try {
+        console.log('Buscando pacotes pendentes...');
+        
         const pacotes = await db.buscarPacotesPendentes();
-        for (const pacote of pacotes) {
-            pacote.itens = await db.buscarItensPacote(pacote.id);
-        }
-        res.json(pacotes);
+        console.log('Pacotes pendentes encontrados:', pacotes.length);
+        
+        // Buscar itens de cada pacote
+        const pacotesComItens = await Promise.all(
+            pacotes.map(async pacote => {
+                try {
+                    pacote.itens = await db.buscarItensPacote(pacote.id);
+                    console.log(`Pacote pendente ${pacote.id} tem ${pacote.itens.length} itens`);
+                    return pacote;
+                } catch (error) {
+                    console.error(`Erro ao buscar itens do pacote pendente ${pacote.id}:`, error);
+                    pacote.itens = [];
+                    return pacote;
+                }
+            })
+        );
+        
+        res.json(pacotesComItens);
     } catch (error) {
         console.error('Erro ao buscar pacotes pendentes:', error);
-        res.status(500).json({ success: false, message: 'Erro ao buscar pacotes pendentes.' });
+        res.status(500).json({ 
+            success: false, 
+            message: 'Erro ao buscar pacotes pendentes: ' + error.message 
+        });
     }
 });
 
+// ADICIONAR nova rota para debug
+app.get('/api/debug/banco', async (req, res) => {
+    try {
+        const estrutura = await db.verificarEstruturaBanco();
+        res.json({
+            success: true,
+            estrutura
+        });
+    } catch (error) {
+        console.error('Erro ao verificar estrutura do banco:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// ADICIONAR rota para verificar se as tabelas existem
+app.get('/api/debug/tabelas', async (req, res) => {
+    try {
+        const tabelas = await new Promise((resolve, reject) => {
+            db.all("SELECT name FROM sqlite_master WHERE type='table'", [], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
+        
+        const contadores = {};
+        for (const tabela of tabelas) {
+            try {
+                const count = await new Promise((resolve, reject) => {
+                    db.get(`SELECT COUNT(*) as total FROM ${tabela.name}`, [], (err, row) => {
+                        if (err) reject(err);
+                        else resolve(row.total);
+                    });
+                });
+                contadores[tabela.name] = count;
+            } catch (error) {
+                contadores[tabela.name] = 'Erro: ' + error.message;
+            }
+        }
+        
+        res.json({
+            success: true,
+            tabelas: tabelas.map(t => t.name),
+            contadores
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Manter as outras rotas existentes (aprovar/negar item, aprovar/negar pacote) como estão
+// Elas parecem estar corretas
 // Aprovar ou negar item do pacote
 app.post('/api/pacotes/item/:itemPacoteId/status', async (req, res) => {
     try {
