@@ -1,3 +1,26 @@
+    <script>
+    // Função para alternar seções e ativar botões de navegação
+    function showSection(sectionId) {
+        // Oculta todas as seções
+        document.querySelectorAll('.section').forEach(section => {
+            section.classList.remove('active');
+        });
+        // Remove active de todos os botões
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        // Mostra a seção desejada
+        const section = document.getElementById(sectionId);
+        if (section) section.classList.add('active');
+        // Ativa o botão correspondente
+        // Busca pelo atributo onclick que contém o id
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(sectionId)) {
+                btn.classList.add('active');
+            }
+        });
+    }
+    </script>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
